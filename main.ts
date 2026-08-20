@@ -11,16 +11,19 @@ import {
 } from "@fedify/fedify";
 import {
   Accept,
+  Announce,
   Create,
   Follow,
+  Like,
   Note,
-  PUBLIC_COLLECTION,
   Undo,
 } from "@fedify/vocab";
+// Accept handles remote acceptances of our outbound Follow activities.
 import { DenoKvMessageQueue, DenoKvStore } from "@fedify/denokv";
 import { bootstrapActors, buildActorDoc, ensureKeyPairs } from "./actors.ts";
 import { handleApi, getToken, loadToken } from "./api.ts";
 import { MyceliumStore, type PostRecord } from "./store.ts";
+import { buildNote, buildCreate } from "./notes.ts";
 import { NetworkProjection, migrateKg } from "./network.ts";
 import { handleNetwork } from "./network_api.ts";
 import { skillMd } from "./skill_md.ts";
@@ -151,9 +154,29 @@ federation
       recipient,
       new Accept({ actor: follow.objectId, object: follow }),
     );
+    await store.putNotification({
+      id: crypto.randomUUID(),
+      type: "follow",
+      identifier,
+      fromActorId: recipient.id?.href ?? "unknown",
+      read: false,
+      created: new Date().toISOString(),
+    });
   })
   .on(Undo, async (ctx, undo) => {
     const inner = await undo.getObject();
+    // Undo(Like) / Undo(Announce) — remove the like/boost record.
+    if (inner instanceof Like || inner instanceof Announce) {
+      const objectId = inner.objectId?.href;
+      const actorUri = inner.actorId?.href;
+      if (objectId == null || actorUri == null) return;
+      const kind = inner instanceof Like ? "like" : "boost";
+      // Target may be a local post URI: /ap/actor/{id}/p/{postId}
+      const m = objectId.match(/\/ap\/actor\/[^/]+\/p\/([^/]+)$/);
+      if (m == null) return;
+      await store.removeLike(kind, m[1], actorUri);
+      return;
+    }
     if (!(inner instanceof Follow)) return;
     const parsed = ctx.parseUri(inner.objectId);
     if (parsed?.type !== "actor") return;
@@ -170,6 +193,16 @@ federation
         }
       }
     }
+  })
+  .on(Accept, async (_ctx, accept) => {
+    // Remote server accepted our outbound Follow. No state change needed:
+    // the FollowingRecord exists from follow time.
+    const inner = await accept.getObject();
+    console.log(
+      "inbox: outbound follow accepted by",
+      accept.actorId?.href ?? "unknown",
+      inner instanceof Follow ? "(Follow)" : "",
+    );
   })
   .on(Create, async (_ctx, create) => {
     const object = await create.getObject();
@@ -188,7 +221,116 @@ federation
       isRemote: true,
     };
     await store.putPost(post);
+
+    // Notifications: replies and mentions for local actors.
+    try {
+      const actors = await store.listActors();
+      const byUri = new Map(
+        actors.map((a) => [
+          ctx_getActorUri(origin, a.identifier).href,
+          a.identifier,
+        ]),
+      );
+      // Reply notification: post replies to a local actor's post.
+      if (post.inReplyTo != null) {
+        const rm = post.inReplyTo.match(/\/ap\/actor\/([^/]+)\/p\/[^/]+$/);
+        if (rm != null && byUri.has(ctx_getActorUri(origin, rm[1]).href)) {
+          const target = rm[1];
+          if (target !== post.identifier) {
+            await store.putNotification({
+              id: crypto.randomUUID(),
+              type: "reply",
+              identifier: target,
+              fromActorId: author,
+              postId: post.id,
+              read: false,
+              created: new Date().toISOString(),
+            });
+          }
+        }
+      }
+      // Mention notifications: read tag[] hrefs from the wire format.
+      const jsonLd = await object.toJsonLd();
+      const rawTag = (jsonLd as Record<string, unknown>).tag;
+      const tags = Array.isArray(rawTag)
+        ? rawTag as Record<string, unknown>[]
+        : rawTag != null
+        ? [rawTag as Record<string, unknown>]
+        : [];
+      for (const t of tags) {
+        const href = typeof t.href === "string" ? t.href : null;
+        if (href != null && byUri.has(href)) {
+          const target = byUri.get(href)!;
+          if (target !== post.identifier) {
+            await store.putNotification({
+              id: crypto.randomUUID(),
+              type: "mention",
+              identifier: target,
+              fromActorId: author,
+              postId: post.id,
+              read: false,
+              created: new Date().toISOString(),
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.error("inbox: notification pass failed:", e);
+    }
+  })
+  .on(Like, async (ctx, like) => {
+    const objectId = like.objectId?.href;
+    const actorUri = like.actorId?.href;
+    if (objectId == null || actorUri == null) return;
+    const m = objectId.match(/\/ap\/actor\/([^/]+)\/p\/([^/]+)$/);
+    if (m == null) return;
+    const [, identifier, postId] = m;
+    await store.putLike({
+      id: like.id?.href ?? crypto.randomUUID(),
+      actorId: actorUri,
+      postId,
+      kind: "like",
+      published: new Date().toISOString(),
+    });
+    await store.putNotification({
+      id: crypto.randomUUID(),
+      type: "like",
+      identifier,
+      fromActorId: actorUri,
+      postId,
+      read: false,
+      created: new Date().toISOString(),
+    });
+  })
+  .on(Announce, async (ctx, announce) => {
+    const objectId = announce.objectId?.href;
+    const actorUri = announce.actorId?.href;
+    if (objectId == null || actorUri == null) return;
+    const m = objectId.match(/\/ap\/actor\/([^/]+)\/p\/([^/]+)$/);
+    if (m == null) return;
+    const [, identifier, postId] = m;
+    await store.putLike({
+      id: announce.id?.href ?? crypto.randomUUID(),
+      actorId: actorUri,
+      postId,
+      kind: "boost",
+      published: new Date().toISOString(),
+    });
+    await store.putNotification({
+      id: crypto.randomUUID(),
+      type: "boost",
+      identifier,
+      fromActorId: actorUri,
+      postId,
+      read: false,
+      created: new Date().toISOString(),
+    });
   });
+
+// Local actor URI without a federation context (plain string build).
+function ctx_getActorUri(originStr: string, identifier: string): URL {
+  return new URL(`/ap/actor/${identifier}`, originStr);
+}
 
 // ── NodeInfo ──
 let actorCountCache = 0;
@@ -211,45 +353,7 @@ federation.setNodeInfoDispatcher("/nodeinfo/2.1", () => ({
   },
 }));
 
-// ── Note builder (federated wire format) ──
-function buildNote(
-  ctx: { getActorUri: (id: string) => URL },
-  post: PostRecord,
-): Note {
-  return new Note({
-    id: new URL(
-      `/ap/actor/${post.identifier}/p/${post.id}`,
-      ctx.getActorUri(post.identifier),
-    ),
-    attribution: ctx.getActorUri(post.identifier),
-    name: post.title,
-    content: post.content,
-    published: Temporal.Instant.from(post.published),
-    replyTarget: post.inReplyTo == null ? undefined : new URL(post.inReplyTo),
-    tos: [PUBLIC_COLLECTION],
-    ccs: [new URL(`${ctx.getActorUri(post.identifier)}/followers`)],
-  });
-}
 
-// ── Create activity builder (outbox items + fan-out) ──
-function buildCreate(
-  ctx: { getActorUri: (id: string) => URL },
-  post: PostRecord,
-): Create {
-  const note = buildNote(ctx, post);
-  return new Create({
-    id: new URL(
-      `/ap/actor/${post.identifier}/p/${post.id}#create`,
-      ctx.getActorUri(post.identifier),
-    ),
-    actor: ctx.getActorUri(post.identifier),
-    object: note,
-    tos: [PUBLIC_COLLECTION],
-    ccs: [new URL(`${ctx.getActorUri(post.identifier)}/followers`)],
-  });
-}
-
-export { buildNote, buildCreate };
 
 export default {
   fetch: async (request: Request): Promise<Response> => {
