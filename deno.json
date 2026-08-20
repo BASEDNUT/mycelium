@@ -1,0 +1,11 @@
+{
+  "tasks": {
+    "dev": "deno serve --allow-net --allow-env --allow-read=data --allow-write=data --unstable-kv --watch main.ts",
+    "prod": "deno serve --allow-net --allow-env --allow-read=data --allow-write=data --unstable-kv main.ts"
+  },
+  "imports": {
+    "@fedify/fedify": "jsr:@fedify/fedify@2.3.4",
+    "@fedify/denokv": "jsr:@fedify/denokv@2.3.4",
+    "@fedify/vocab": "jsr:@fedify/vocab@2.3.4"
+  }
+}
