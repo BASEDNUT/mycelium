@@ -1,8 +1,8 @@
-// Mycelium v0.1 — clean-room ActivityPub node on Fedify 2.3.4.
-// Original code. No BotKit imports. MIT license.
+// Mycelium — ActivityPub node on Fedify 2.3.4.
+// Original code. MIT license.
 //
 // Run: deno serve --allow-net --allow-env --allow-read=data --allow-write=data --unstable-kv main.ts
-// Env: ORIGIN=https://taproot.basednut.com
+// Env: ORIGIN (public origin) · DATA_DIR (default ./data) · MYCELIUM_TOKEN_FILE (default $DATA_DIR/api_token)
 
 import {
   createFederation,
@@ -20,25 +20,28 @@ import {
 import { DenoKvMessageQueue, DenoKvStore } from "@fedify/denokv";
 import { bootstrapActors, buildActorDoc, ensureKeyPairs } from "./actors.ts";
 import { handleApi, getToken, loadToken } from "./api.ts";
-import { MyceliumStore, type PostRecord, type StoredKeyPair } from "./store.ts";
-import { KgStore } from "./kg.ts";
-import { handleKg } from "./kg_api.ts";
+import { MyceliumStore, type PostRecord } from "./store.ts";
+import { NetworkProjection, migrateKg } from "./network.ts";
+import { handleNetwork } from "./network_api.ts";
 import { skillMd } from "./skill_md.ts";
 import { landingHtml } from "./landing.ts";
+import { VERSION } from "./version.ts";
 
-const DATA_DIR = "/a0/usr/projects/peanutoshi/agent-social/data";
+const DATA_DIR = Deno.env.get("DATA_DIR") ?? "./data";
+const TOKEN_FILE = Deno.env.get("MYCELIUM_TOKEN_FILE") ?? `${DATA_DIR}/api_token`;
 const kv = await Deno.openKv(`${DATA_DIR}/mycelium.db`);
 const store = new MyceliumStore(kv);
-const kg = new KgStore(kv);
+const network = new NetworkProjection(kv);
+await migrateKg(kv); // one-time: legacy kg entities -> semantic objects
 await bootstrapActors(store);
-await loadToken(`${DATA_DIR}/api_token`);
+await loadToken(TOKEN_FILE);
 const origin = Deno.env.get("ORIGIN") ?? "https://taproot.basednut.com";
 
 const federation = createFederation<void>({
   kv: new DenoKvStore(kv),
   queue: new DenoKvMessageQueue(kv),
   origin,
-  userAgent: "Mycelium/0.1.0",
+  userAgent: `Mycelium/${VERSION}`,
 });
 
 // ── Actor + keys ──
@@ -98,6 +101,7 @@ federation
     async (ctx, identifier, cursor) => {
       if (await store.getActor(identifier) == null) return null;
       const all = (await store.listPosts(identifier))
+        .filter((p) => p.isRemote !== true)
         .sort((a, b) => b.published.localeCompare(a.published));
       const size = 20;
       const offset = cursor == null ? 0 : parseInt(cursor);
@@ -110,7 +114,7 @@ federation
     },
   )
   .setCounter(async (_ctx, identifier) =>
-    (await store.listPosts(identifier)).length
+    (await store.listPosts(identifier)).filter((p) => p.isRemote !== true).length
   );
 
 // ── Note object dispatcher ──
@@ -125,38 +129,41 @@ federation.setObjectDispatcher(
 );
 
 // ── Inbox ──
+// ctx.recipient is null when an activity arrives at the shared inbox;
+// handlers below derive the target actor from the activity itself instead
+// of discarding shared-inbox deliveries.
 federation
   .setInboxListeners("/ap/actor/{identifier}/inbox", "/ap/inbox")
   .on(Follow, async (ctx, follow) => {
-    const identifier = ctx.recipient;
-    if (identifier == null) return;
     const parsed = ctx.parseUri(follow.objectId);
     if (parsed?.type !== "actor") return;
+    const identifier = ctx.recipient ?? parsed.identifier;
     const recipient = await follow.getActor(ctx);
     if (recipient == null) return;
-    await store.addFollower(parsed.identifier, {
+    await store.addFollower(identifier, {
       id: follow.id?.href ?? crypto.randomUUID(),
       followerId: recipient.id?.href ?? "",
       inbox: recipient.inboxId?.href ?? null,
       followed: new Date().toISOString(),
     });
     await ctx.sendActivity(
-      { identifier: parsed.identifier },
-    recipient,
+      { identifier },
+      recipient,
       new Accept({ actor: follow.objectId, object: follow }),
     );
   })
   .on(Undo, async (ctx, undo) => {
-    const identifier = ctx.recipient;
-    if (identifier == null) return;
     const inner = await undo.getObject();
     if (!(inner instanceof Follow)) return;
+    const parsed = ctx.parseUri(inner.objectId);
+    if (parsed?.type !== "actor") return;
+    const identifier = ctx.recipient ?? parsed.identifier;
     const followId = inner.id?.href;
     if (followId != null) {
       await store.removeFollower(identifier, followId);
     }
     const followerUri = inner.actorId?.href;
-    if ( followerUri != null) {
+    if (followerUri != null) {
       for (const f of await store.getFollowers(identifier)) {
         if (f.followerId === followerUri) {
           await store.removeFollower(identifier, f.id);
@@ -164,27 +171,38 @@ federation
       }
     }
   })
-  .on(Create, async (ctx, create) => {
+  .on(Create, async (_ctx, create) => {
     const object = await create.getObject();
     if (!(object instanceof Note)) return;
     const author = create.actorId?.href ?? "unknown";
+    // Store idempotently: remote retries overwrite the same key.
     const post: PostRecord = {
       id: object.id?.href ?? crypto.randomUUID(),
-      // Remote post: store under author's actor URI fragment for listing
-      identifier: "__remote__" + author,
+      identifier: author,
       content: object.content?.toString() ?? "",
       published: object.published?.toString() ?? new Date().toISOString(),
       inReplyTo: object.replyTargetId?.href,
       visibility: "public",
+      form: "short",
+      title: object.name?.toString(),
+      isRemote: true,
     };
     await store.putPost(post);
   });
 
 // ── NodeInfo ──
-const actorCount = () => store.listActors().then((a) => a.length);
-const postCount = () => store.listPosts(null).then((p) => p.length);
+let actorCountCache = 0;
+let postCountCache = 0;
+async function refreshCounts(): Promise<void> {
+  actorCountCache = (await store.listActors()).length;
+  postCountCache = (await store.listPosts(null))
+    .filter((p) => p.isRemote !== true).length;
+}
+refreshCounts();
+setInterval(() => refreshCounts(), 60_000);
+
 federation.setNodeInfoDispatcher("/nodeinfo/2.1", () => ({
-  software: { name: "mycelium", version: "0.1.0" },
+  software: { name: "mycelium", version: VERSION },
   protocols: ["activitypub"],
   usage: {
     users: { total: actorCountCache },
@@ -193,17 +211,7 @@ federation.setNodeInfoDispatcher("/nodeinfo/2.1", () => ({
   },
 }));
 
-// cached counts (updated on boot; NodeInfo callback must be sync)
-let actorCountCache = 0;
-let postCountCache = 0;
-async function refreshCounts(): Promise<void> {
-  actorCountCache = await actorCount();
-  postCountCache = await postCount();
-}
-refreshCounts();
-setInterval(() => refreshCounts(), 60_000);
-
-// ── Note builder ──
+// ── Note builder (federated wire format) ──
 function buildNote(
   ctx: { getActorUri: (id: string) => URL },
   post: PostRecord,
@@ -214,14 +222,16 @@ function buildNote(
       ctx.getActorUri(post.identifier),
     ),
     attribution: ctx.getActorUri(post.identifier),
+    name: post.title,
     content: post.content,
     published: Temporal.Instant.from(post.published),
+    replyTarget: post.inReplyTo == null ? undefined : new URL(post.inReplyTo),
     tos: [PUBLIC_COLLECTION],
     ccs: [new URL(`${ctx.getActorUri(post.identifier)}/followers`)],
   });
 }
 
-// ── Create activity builder (outbox items) ──
+// ── Create activity builder (outbox items + fan-out) ──
 function buildCreate(
   ctx: { getActorUri: (id: string) => URL },
   post: PostRecord,
@@ -239,18 +249,34 @@ function buildCreate(
   });
 }
 
+export { buildNote, buildCreate };
+
 export default {
   fetch: async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
 
     if (url.pathname === "/skill.md") {
-      return new Response(skillMd(origin), {
+      return new Response(skillMd(origin, VERSION), {
         headers: { "content-type": "text/markdown; charset=utf-8" },
       });
     }
 
+    if (url.pathname.startsWith("/api/network/")) {
+      return await handleNetwork(request, { store, network, origin });
+    }
+
+    // Legacy KG endpoints are superseded by the network projection API.
     if (url.pathname.startsWith("/api/kg/")) {
-      return await handleKg(request, kg, getToken());
+      return new Response(
+        JSON.stringify({
+          error: "gone",
+          detail: "knowledge graph endpoints moved to /api/network/*",
+        }),
+        {
+          status: 410,
+          headers: { "content-type": "application/json; charset=utf-8" },
+        },
+      );
     }
 
     if (url.pathname.startsWith("/api/")) {
@@ -258,15 +284,18 @@ export default {
     }
 
     if (url.pathname === "/" || url.pathname === "/index.html") {
-      const [actors, posts, graph] = await Promise.all([
+      const [actors, posts] = await Promise.all([
         store.listActors(),
         store.listPosts(null),
-        kg.graph(),
       ]);
-      const localPosts = posts
-        .filter((p) => !p.identifier.startsWith("__remote__"))
-        .sort((a, b) => b.published.localeCompare(a.published));
-      return new Response(landingHtml(origin, actors, localPosts, graph), {
+      const graph = await network.build(
+        actors,
+        posts,
+        async (id) =>
+          (await store.getFollowers(id)).map((f) => f.followerId),
+      );
+      const sorted = posts.sort((a, b) => b.published.localeCompare(a.published));
+      return new Response(landingHtml(origin, actors, sorted, graph), {
         headers: { "content-type": "text/html; charset=utf-8" },
       });
     }

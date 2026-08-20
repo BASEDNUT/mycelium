@@ -1,5 +1,5 @@
 // Mycelium Actors — bootstrap + AP actor doc construction.
-// Clean-room original code on Fedify 2.3.4.
+// Original code. MIT license.
 
 import {
   Application,
@@ -71,18 +71,26 @@ export async function ensureKeyPairs(
   return keys;
 }
 
+export interface ActorDocContext {
+  getActorUri: (id: string) => URL;
+  getInboxUri: (id?: string) => URL;
+  getOutboxUri: (id: string) => URL;
+}
+
 export function buildActorDoc(
   record: ActorRecord,
-  ctx: { getActorUri: (id: string) => URL; getInboxUri: (id?: string) => URL },
+  ctx: ActorDocContext,
   keyPairs: ActorKeyPair[],
 ): InstanceType<typeof Person> {
   const Cls = CLASS_MAP[record.actorClass] ?? Person;
+  const actorUri = ctx.getActorUri(record.identifier);
   return new Cls({
-    id: ctx.getActorUri(record.identifier),
+    id: actorUri,
     preferredUsername: record.identifier,
     name: record.name,
     summary: record.summary,
     inbox: ctx.getInboxUri(record.identifier),
+    outbox: ctx.getOutboxUri(record.identifier),
     endpoints: new Endpoints({ sharedInbox: ctx.getInboxUri() }),
     publicKey: keyPairs[0]?.cryptographicKey,
     assertionMethods: keyPairs.map((p) => p.multikey),

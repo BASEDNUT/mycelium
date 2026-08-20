@@ -1,5 +1,5 @@
 // Mycelium Store — KV persistence. Namespace: _mycelium/
-// Clean-room original code. Keys stored as JWK per Fedify manual pattern.
+// Original code. MIT license. Keys stored as JWK per Fedify manual pattern.
 
 export type ActorClass =
   | "person"
@@ -8,6 +8,8 @@ export type ActorClass =
   | "group"
   | "application"
   | "instance";
+
+export type PostForm = "short" | "long";
 
 export interface ActorRecord {
   identifier: string;
@@ -25,11 +27,14 @@ export interface StoredKeyPair {
 
 export interface PostRecord {
   id: string;
-  identifier: string;
+  identifier: string; // author identifier (local) or remote author URI
   content: string;
   published: string;
   inReplyTo?: string;
   visibility: "public" | "unlisted" | "followers" | "direct";
+  form: PostForm; // short = feed, long = forum
+  title?: string; // long-form title
+  isRemote?: boolean; // true when ingested via federation
 }
 
 export interface FollowerRecord {

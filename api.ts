@@ -1,9 +1,11 @@
 // Mycelium Local API — machine-first write/read surface.
-// Clean-room original code. MIT license.
+// Framework: Mycelium (this implementation: Taproot node).
+// Original code. MIT license.
 
 import type { Federation } from "@fedify/fedify";
-import { Create, Note, PUBLIC_COLLECTION } from "@fedify/vocab";
-import type { ActorClass, MyceliumStore, PostRecord } from "./store.ts";
+import type { ActorClass, MyceliumStore, PostForm, PostRecord } from "./store.ts";
+import { buildCreate } from "./notes.ts";
+import { VERSION } from "./version.ts";
 
 export interface ApiDeps {
   store: MyceliumStore;
@@ -40,9 +42,11 @@ function authorized(request: Request): boolean {
 }
 
 const MAX_CONTENT = 5000;
+const MAX_TITLE = 200;
 const ACTOR_CLASSES = new Set([
   "person", "agent", "service", "group", "application", "instance",
 ]);
+const POST_FORMS = new Set<PostForm>(["short", "long"]);
 
 export async function handleApi(
   request: Request,
@@ -52,7 +56,7 @@ export async function handleApi(
   const path = url.pathname;
 
   if (path === "/api/health") {
-    return json(200, { ok: true, software: "mycelium", version: "0.1.0" });
+    return json(200, { ok: true, software: "mycelium", version: VERSION });
   }
 
   if (path === "/api/actors" && request.method === "GET") {
@@ -110,15 +114,35 @@ export async function handleApi(
     const content = String(body.content ?? "").trim();
     const inReplyTo = body.inReplyTo == null
       ? undefined
-      : String(body.inReplyTo);
+      : String(body.inReplyTo).trim();
+    const form = String(body.form ?? "short").trim() as PostForm;
+    const title = body.title == null
+      ? undefined
+      : String(body.title).trim();
     if (!identifier || !content) {
       return json(400, { error: "identifier and content required" });
     }
     if (content.length > MAX_CONTENT) {
       return json(400, { error: `content too long (max ${MAX_CONTENT})` });
     }
+    if (!POST_FORMS.has(form)) {
+      return json(400, { error: `form must be short or long` });
+    }
+    if (form === "long" && !title) {
+      return json(400, { error: "title required for long-form posts" });
+    }
+    if (title != null && title.length > MAX_TITLE) {
+      return json(400, { error: `title too long (max ${MAX_TITLE})` });
+    }
     if (await deps.store.getActor(identifier) == null) {
       return json(404, { error: "unknown actor" });
+    }
+    // Reply target must exist: local post id or remote URI.
+    if (inReplyTo != null) {
+      const isUri = /^https?:\/\//.test(inReplyTo);
+      if (!isUri && (await deps.store.getPost(inReplyTo)) == null) {
+        return json(404, { error: "inReplyTo post not found" });
+      }
     }
 
     const post: PostRecord = {
@@ -128,6 +152,8 @@ export async function handleApi(
       published: new Date().toISOString(),
       inReplyTo,
       visibility: "public",
+      form,
+      title: title || undefined,
     };
     await deps.store.putPost(post);
 
@@ -138,22 +164,7 @@ export async function handleApi(
         new URL(deps.origin),
         undefined,
       );
-      const actorUri = ctx.getActorUri(identifier);
-      const note = new Note({
-        id: new URL(`/ap/actor/${identifier}/p/${post.id}`, actorUri),
-        attribution: actorUri,
-        content: post.content,
-        published: Temporal.Instant.from(post.published),
-        tos: [PUBLIC_COLLECTION],
-        ccs: [new URL(`${actorUri.href}/followers`)],
-      });
-      const create = new Create({
-        id: new URL(`/ap/actor/${identifier}/p/${post.id}#create`, actorUri),
-        actor: actorUri,
-        object: note,
-        tos: [PUBLIC_COLLECTION],
-        ccs: [new URL(`${actorUri.href}/followers`)],
-      });
+      const create = buildCreate(ctx, post);
       await ctx.sendActivity({ identifier }, "followers", create);
       followersNotified = (await deps.store.getFollowers(identifier)).length;
     } catch (e) {
@@ -168,12 +179,20 @@ export async function handleApi(
     const identifier = actorParam == null || actorParam === ""
       ? null
       : actorParam.trim().toLowerCase();
+    const formParam = url.searchParams.get("form");
+    const form = formParam == null || formParam === ""
+      ? null
+      : (formParam as PostForm);
+    if (form != null && !POST_FORMS.has(form)) {
+      return json(400, { error: "form must be short or long" });
+    }
     const limit = Math.min(
       Math.max(parseInt(url.searchParams.get("limit") ?? "50") || 50, 1),
       200,
     );
     const posts = (await deps.store.listPosts(identifier))
-      .filter((p) => !p.identifier.startsWith("__remote__"))
+      .filter((p) => form == null || (p.form ?? "short") === form)
+      .filter((p) => p.isRemote !== true || p.identifier === identifier)
       .sort((a, b) => b.published.localeCompare(a.published))
       .slice(0, limit);
     return json(200, { count: posts.length, posts });
