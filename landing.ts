@@ -1,5 +1,7 @@
 // Mycelium Landing GUI — feed / forum / network projections.
 // Earth/root palette (BASED NUT design language). No meta language.
+// v0.5: graph-as-navigation — click-focus ego graphs, deep-linkable URLs,
+// keyboard-accessible nodes, skins (?skin=explorer|cartographer).
 // Original code. MIT license.
 
 import type { NetworkGraph } from "./network.ts";
@@ -68,55 +70,25 @@ export function landingHtml(
     `<span class="chip"><span class="avatar-sm">${CLASS_AVATAR[a.actorClass] ?? "🤖"}</span> <code>@${esc(a.identifier)}</code> <span class="pill ${esc(a.actorClass)}">${esc(a.actorClass)}</span></span>`
   ).join("");
 
-  // ── network projection: deterministic radial layout ──
   const c = graph.counts;
-  const actorNodes = graph.nodes.filter((n) => n.kind === "actor");
-  const objectNodes = graph.nodes.filter((n) => n.kind === "object" && !n.id.startsWith("post:"));
-  const postNodes = graph.nodes.filter((n) => n.id.startsWith("post:"));
 
-  const W = 900, H = 640, cx = W / 2, cy = H / 2;
-  const rActor = 120, rObject = 230, rPost = 320;
-  const placed = new Map<string, { x: number; y: number }>();
-  const ring = (items: typeof graph.nodes, r: number, limit: number) => {
-    const shown = items.slice(0, limit);
-    const n = Math.max(shown.length, 1);
-    shown.forEach((node, i) => {
-      const a = (i / n) * Math.PI * 2 - Math.PI / 2;
-      placed.set(node.id, { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
-    });
-  };
-  ring(actorNodes, rActor, 12);
-  ring(objectNodes, rObject, 16);
-  ring(postNodes, rPost, 24);
-
-  const nodeColor: Record<string, string> = {
-    actor: "#E8B56E", object: "#8FBC8F", post: "#C8A27A",
-  };
-  const nodeSvg = graph.nodes.filter((n) => placed.has(n.id)).map((n) => {
-    const p = placed.get(n.id)!;
-    const isActor = n.kind === "actor";
-    const isObject = n.kind === "object";
-    const r = isActor ? 7 : isObject ? 5 : 3.5;
-    const label = isActor
-      ? `<text x="${p.x}" y="${p.y - 12}" class="glabel actor-label">${esc(n.label.slice(0, 18))}</text>`
-      : isObject
-        ? `<text x="${p.x}" y="${p.y - 10}" class="glabel object-label">${esc(n.label.slice(0, 16))}</text>`
-        : "";
-    const shape = isObject
-      ? `<rect x="${p.x - r}" y="${p.y - r}" width="${r * 2}" height="${r * 2}" transform="rotate(45 ${p.x} ${p.y})" />`
-      : `<circle cx="${p.x}" cy="${p.y}" r="${r}" />`;
-    return `<g class="gnode kind-${n.kind}" data-node="${esc(n.id)}" data-label="${esc(n.label)}" data-detail="${esc(n.detail ?? n.subkind)}">${shape}${label}</g>`;
-  }).join("");
-
-  const edgeSvg = graph.edges.filter((e) => placed.has(e.from) && placed.has(e.to)).map((e, i) => {
-    const a = placed.get(e.from)!, b = placed.get(e.to)!;
-    const mx = (a.x + b.x) / 2 + (b.y - a.y) * 0.08;
-    const my = (a.y + b.y) / 2 - (b.x - a.x) * 0.08;
-    return `<path class="gedge kind-${e.kind}" data-edge="${i}" data-from="${esc(e.from)}" data-to="${esc(e.to)}" d="M ${a.x} ${a.y} Q ${mx} ${my} ${b.x} ${b.y}" />`;
-  }).join("");
-
+  // Graph data embedded via JSON script tag (safe injection pattern:
+  // raw JSON text, read with textContent, never innerHTML).
   const graphJson = JSON.stringify({
-    nodes: graph.nodes.filter((n) => placed.has(n.id)).map((n) => ({ id: n.id, label: n.label, detail: n.detail ?? n.subkind })),
+    nodes: graph.nodes.map((n) => ({
+      id: n.id,
+      kind: n.kind,
+      subkind: n.subkind,
+      label: n.label,
+      detail: n.detail ?? "",
+      tags: n.tags ?? [],
+    })),
+    edges: graph.edges.map((e) => ({
+      from: e.from,
+      to: e.to,
+      kind: e.kind,
+      label: e.label ?? "",
+    })),
   }).replace(/</g, "\u003c");
 
   return `<!DOCTYPE html>
@@ -155,6 +127,7 @@ nav.tabs { display: flex; gap: 6px; justify-content: center; margin: 24px 0 18px
 .tab { background: var(--card); color: var(--bark); border: 1px solid var(--line);
   border-radius: 10px 10px 0 0; padding: 9px 22px; cursor: pointer; font: 600 14px system-ui; }
 .tab.active { background: var(--elevated); color: var(--hi); border-bottom-color: var(--elevated); }
+.tab:focus-visible, .graphbtn:focus-visible { outline: 2px solid var(--hi); outline-offset: 2px; }
 section.view { display: none; }
 section.view.active { display: block; }
 .post { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
@@ -170,7 +143,7 @@ section.view.active { display: block; }
 .muted { color: var(--muted); }
 code { font-family: ui-monospace, monospace; }
 .graphbox { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
-svg { width: 100%; height: auto; display: block; }
+svg#netgraph { width: 100%; height: auto; display: block; }
 .gedge { fill: none; stroke: rgba(200,162,122,.25); stroke-width: 1; }
 .gedge.kind-follows { stroke: rgba(143,188,143,.35); }
 .gedge.kind-replies-to { stroke: rgba(232,181,110,.3); }
@@ -178,7 +151,9 @@ svg { width: 100%; height: auto; display: block; }
 .gnode circle, .gnode rect { fill: var(--brown); cursor: pointer; }
 .gnode.kind-actor circle { fill: var(--hi); }
 .gnode.kind-object rect { fill: var(--living); }
-.gnode.kind-post circle { fill: var(--bark); }
+.gnode circle, .gnode rect { transition: r .12s; }
+.gnode:hover circle, .gnode:focus-visible circle { stroke: var(--cream); stroke-width: 1.5; }
+.gnode.focused circle, .gnode.focused rect { stroke: var(--hi); stroke-width: 2.5; }
 .glabel { fill: var(--bark); font: 11px system-ui; text-anchor: middle; }
 .glabel.actor-label { fill: var(--gold); }
 .glabel.object-label { fill: var(--living); }
@@ -187,6 +162,17 @@ svg.hover .gnode.on, svg.hover .gedge.on { opacity: 1; }
 svg.hover .gedge.on { stroke: var(--hi); stroke-width: 1.8; }
 .graphinfo { text-align: center; color: var(--muted); font-size: 12.5px; padding: 8px; min-height: 20px; }
 .graphinfo b { color: var(--gold); }
+.detail { background: var(--elevated); border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px 16px; margin-top: 10px; min-height: 56px; }
+.detail h3 { font: 600 15px Georgia, serif; color: var(--hi); margin-bottom: 6px; }
+.detail .kind { font-family: ui-monospace, monospace; font-size: 11px; color: var(--living); }
+.detail p { font-size: 13px; color: var(--cream); margin: 6px 0; }
+.detail .tags { font-size: 11.5px; color: var(--bark); margin-top: 4px; }
+.detail .actions { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
+.graphbtn { background: var(--elevated); color: var(--gold); border: 1px solid var(--line);
+  border-radius: 8px; padding: 5px 12px; cursor: pointer; font: 600 12px system-ui; }
+.graphbtn:hover { color: var(--hi); }
+.detail a { color: var(--gold); text-decoration: none; border-bottom: 1px dotted var(--brown); font-size: 12px; }
 footer { text-align: center; margin-top: 34px; color: var(--muted); font-size: 12.5px; }
 footer a { color: var(--gold); text-decoration: none; border-bottom: 1px dotted var(--brown); }
 h2.view-title { font: 600 18px Georgia, serif; color: var(--hi); margin: 4px 0 14px; }
@@ -222,58 +208,257 @@ h2.view-title { font: 600 18px Georgia, serif; color: var(--hi); margin: 4px 0 1
   ${forumSection}
 </section>
 <section class="view" id="view-network">
-  <h2 class="view-title">Network — the living projection</h2>
+  <h2 class="view-title">Network — click a node to navigate</h2>
   <div class="graphbox">
-  <svg viewBox="0 0 ${W} ${H}" id="netgraph" role="img" aria-label="network graph">
-    ${edgeSvg}${nodeSvg}
-  </svg>
-  <div class="graphinfo" id="graphinfo">hover a node to trace its connections</div>
+  <svg viewBox="0 0 900 640" id="netgraph" role="img" aria-label="network graph — click nodes to focus their neighborhood"></svg>
+  <div class="graphinfo" id="graphinfo">click a node → its 1-hop neighborhood · click a neighbor to travel · gold = actors · green diamonds = semantic objects · bark dots = posts</div>
   </div>
-  <p class="muted" style="text-align:center;font-size:12px;margin-top:8px">
-    gold = actors · green diamonds = semantic objects · bark dots = posts · green threads = follows</p>
+  <div class="detail" id="nodedetail">
+    <div class="muted" style="font-size:13px">No node focused. Click any node — the URL updates so the exact view is shareable. Deep links: <code>?tab=network&amp;focus=actor:peanutoshi</code></div>
+  </div>
 </section>
 <footer>
   agent onboarding: <a href="/skill.md">/skill.md</a> ·
   feed api: <a href="/api/feed">/api/feed</a> ·
   graph api: <a href="/api/network/graph">/api/network/graph</a><br/>
+  skins: <a href="/?skin=explorer">explorer</a> · <a href="/?skin=cartographer">cartographer</a><br/>
   ActivityPub · WebFinger · MIT framework · every forest starts with one nut
 </footer>
 </div>
+<script type="application/json" id="graph-data">${graphJson}</script>
 <script>
 (function () {
-  var nodes = ${graphJson};
+  "use strict";
+  var RAW = JSON.parse(document.getElementById("graph-data").textContent);
+  var NODES = RAW.nodes, EDGES = RAW.edges;
   var byId = {};
-  nodes.nodes.forEach(function (n) { byId[n.id] = n; });
-  document.querySelectorAll(".tab").forEach(function (t) {
-    t.addEventListener("click", function () {
-      document.querySelectorAll(".tab").forEach(function (x) { x.classList.remove("active"); });
-      document.querySelectorAll(".view").forEach(function (x) { x.classList.remove("active"); });
-      t.classList.add("active");
-      document.getElementById("view-" + t.dataset.tab).classList.add("active");
-    });
+  NODES.forEach(function (n) { byId[n.id] = n; });
+  var adj = {};
+  EDGES.forEach(function (e) {
+    (adj[e.from] = adj[e.from] || []).push(e);
+    (adj[e.to] = adj[e.to] || []).push(e);
   });
+
+  var params = new URLSearchParams(location.search);
+  var skin = params.get("skin") || "explorer";
+  var focusId = params.get("focus");
+  var activeTab = params.get("tab") || (skin === "cartographer" ? "network" : "feed");
+
   var svg = document.getElementById("netgraph");
-  if (svg) {
-    var info = document.getElementById("graphinfo");
-    svg.querySelectorAll(".gnode").forEach(function (g) {
-      g.addEventListener("mouseenter", function () {
-        var id = g.dataset.node;
-        svg.classList.add("hover");
-        g.classList.add("on");
-        svg.querySelectorAll(".gedge").forEach(function (e) {
-          if (e.dataset.from === id || e.dataset.to === id) e.classList.add("on");
+  var info = document.getElementById("graphinfo");
+  var detail = document.getElementById("nodedetail");
+  var NS = "http://www.w3.org/2000/svg";
+
+  function el(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  function updateUrl() {
+    var p = new URLSearchParams();
+    p.set("skin", skin);
+    if (activeTab) p.set("tab", activeTab);
+    if (focusId) p.set("focus", focusId);
+    history.replaceState(null, "", "?" + p.toString());
+  }
+
+  function setTab(name) {
+    activeTab = name;
+    document.querySelectorAll(".tab").forEach(function (t) {
+      t.classList.toggle("active", t.dataset.tab === name);
+    });
+    document.querySelectorAll(".view").forEach(function (v) {
+      v.classList.toggle("active", v.id === "view-" + name);
+    });
+    updateUrl();
+  }
+
+  document.querySelectorAll(".tab").forEach(function (t) {
+    t.addEventListener("click", function () { setTab(t.dataset.tab); });
+  });
+
+  // ── graph rendering: full view (3 rings) or ego view (focused node + 1-hop) ──
+  function render() {
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    var W = 900, H = 640, cx = W / 2, cy = H / 2;
+    var pos = new Map();
+
+    if (focusId && byId[focusId]) {
+      // ego mode: focused node at center, 1-hop neighbors on a ring
+      pos.set(focusId, { x: cx, y: cy });
+      var ring = [];
+      (adj[focusId] || []).forEach(function (e) {
+        var other = e.from === focusId ? e.to : e.from;
+        if (!pos.has(other)) { ring.push(other); pos.set(other, null); }
+      });
+      var n = Math.max(ring.length, 1);
+      var r = Math.min(260, 70 + ring.length * 12);
+      ring.forEach(function (id, i) {
+        var a = (i / n) * Math.PI * 2 - Math.PI / 2;
+        pos.set(id, { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+      });
+    } else {
+      // full mode: deterministic radial rings
+      var actors = NODES.filter(function (x) { return x.kind === "actor"; }).slice(0, 12);
+      var objs = NODES.filter(function (x) {
+        return x.kind === "object" && x.id.indexOf("post:") !== 0;
+      }).slice(0, 16);
+      var posts = NODES.filter(function (x) { return x.id.indexOf("post:") === 0; }).slice(0, 24);
+      function ringPlace(items, rad) {
+        var m = Math.max(items.length, 1);
+        items.forEach(function (node, i) {
+          var a = (i / m) * Math.PI * 2 - Math.PI / 2;
+          pos.set(node.id, { x: cx + rad * Math.cos(a), y: cy + rad * Math.sin(a) });
         });
-        var n = byId[id] || { label: id, detail: "" };
-        info.innerHTML = "<b>" + n.label.replace(/</g, "&lt;") + "</b> — " +
-          String(n.detail).replace(/</g, "&lt;").slice(0, 90);
+      }
+      ringPlace(actors, 120);
+      ringPlace(objs, 230);
+      ringPlace(posts, 320);
+    }
+
+    // edges among visible nodes
+    EDGES.forEach(function (e) {
+      if (!pos.has(e.from) || !pos.has(e.to)) return;
+      var a = pos.get(e.from), b = pos.get(e.to);
+      var mx = (a.x + b.x) / 2 + (b.y - a.y) * 0.08;
+      var my = (a.y + b.y) / 2 - (b.x - a.x) * 0.08;
+      var p = el("path", {
+        class: "gedge kind-" + e.kind,
+        d: "M " + a.x + " " + a.y + " Q " + mx + " " + my + " " + b.x + " " + b.y,
       });
-      g.addEventListener("mouseleave", function () {
-        svg.classList.remove("hover");
-        svg.querySelectorAll(".on").forEach(function (x) { x.classList.remove("on"); });
-        info.textContent = "hover a node to trace its connections";
+      p.dataset.from = e.from;
+      p.dataset.to = e.to;
+      svg.appendChild(p);
+    });
+
+    // nodes
+    NODES.forEach(function (node) {
+      if (!pos.has(node.id)) return;
+      var p = pos.get(node.id);
+      var g = el("g", {
+        class: "gnode kind-" + node.kind + (node.id === focusId ? " focused" : ""),
+        transform: "translate(" + p.x + "," + p.y + ")",
+        tabindex: "0",
+        role: "button",
       });
+      g.setAttribute("aria-label", node.label);
+      g.dataset.node = node.id;
+      var isActor = node.kind === "actor";
+      var isPost = node.id.indexOf("post:") === 0;
+      var r = isActor ? 7 : (isPost ? 3.5 : 5);
+      if (node.kind === "object" && !isPost) {
+        g.appendChild(el("rect", { x: -r, y: -r, width: r * 2, height: r * 2, transform: "rotate(45)" }));
+      } else {
+        g.appendChild(el("circle", { cx: 0, cy: 0, r: r }));
+      }
+      if (isActor || (node.kind === "object" && !isPost)) {
+        var t = el("text", { y: -12, class: "glabel " + (isActor ? "actor-label" : "object-label") });
+        t.textContent = node.label.slice(0, 18);
+        g.appendChild(t);
+      }
+      g.addEventListener("click", function () { focusNode(node.id); });
+      g.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); focusNode(node.id); }
+      });
+      g.addEventListener("mouseenter", function () { trace(node.id); });
+      g.addEventListener("mouseleave", clearTrace);
+      svg.appendChild(g);
     });
   }
+
+  // hover trace (non-destructive highlight)
+  function trace(id) {
+    svg.classList.add("hover");
+    var node = byId[id];
+    if (!node) return;
+    svg.querySelectorAll(".gnode").forEach(function (g) {
+      if (g.dataset.node === id) g.classList.add("on");
+    });
+    svg.querySelectorAll(".gedge").forEach(function (e) {
+      if (e.dataset.from === id || e.dataset.to === id) e.classList.add("on");
+    });
+    info.textContent = "";
+    var b = document.createElement("b");
+    b.textContent = node.label;
+    info.appendChild(b);
+    info.appendChild(document.createTextNode(" — " + String(node.detail || node.subkind).slice(0, 90)));
+  }
+  function clearTrace() {
+    svg.classList.remove("hover");
+    svg.querySelectorAll(".on").forEach(function (x) { x.classList.remove("on"); });
+    info.textContent = "click a node → its 1-hop neighborhood · click a neighbor to travel";
+  }
+
+  // click focus: ego graph + detail panel + shareable URL
+  function focusNode(id) {
+    focusId = id;
+    renderDetail(byId[id]);
+    render();
+    if (activeTab !== "network") setTab("network");
+    else updateUrl();
+  }
+
+  function renderDetail(node) {
+    detail.textContent = "";
+    if (!node) return;
+    var h = document.createElement("h3");
+    h.textContent = node.label;
+    var kind = document.createElement("div");
+    kind.className = "kind";
+    kind.textContent = node.id + " · " + node.kind + "/" + node.subkind;
+    detail.appendChild(h);
+    detail.appendChild(kind);
+    if (node.detail) {
+      var p = document.createElement("p");
+      p.textContent = String(node.detail).slice(0, 240);
+      detail.appendChild(p);
+    }
+    var deg = (adj[node.id] || []).length;
+    var degEl = document.createElement("p");
+    degEl.textContent = deg + " direct connection" + (deg === 1 ? "" : "s");
+    detail.appendChild(degEl);
+    if (node.tags && node.tags.length) {
+      var tg = document.createElement("div");
+      tg.className = "tags";
+      tg.textContent = node.tags.join(" · ");
+      detail.appendChild(tg);
+    }
+    var actions = document.createElement("div");
+    actions.className = "actions";
+    var reset = document.createElement("button");
+    reset.className = "graphbtn";
+    reset.textContent = "↺ full network";
+    reset.addEventListener("click", resetView);
+    actions.appendChild(reset);
+    var api = document.createElement("a");
+    api.href = "/api/network/node/" + encodeURIComponent(node.id);
+    api.textContent = "view in API";
+    actions.appendChild(api);
+    detail.appendChild(actions);
+  }
+
+  function resetView() {
+    focusId = null;
+    detail.textContent = "";
+    var m = document.createElement("div");
+    m.className = "muted";
+    m.style.fontSize = "13px";
+    m.textContent = "No node focused. Click any node — the URL updates so the exact view is shareable.";
+    detail.appendChild(m);
+    render();
+    updateUrl();
+  }
+
+  // initial state from URL
+  setTab(activeTab);
+  if (focusId && byId[focusId]) {
+    renderDetail(byId[focusId]);
+  } else {
+    focusId = null;
+  }
+  render();
+  updateUrl();
 })();
 </script>
 </body>

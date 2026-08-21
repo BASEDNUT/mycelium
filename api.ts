@@ -14,7 +14,7 @@ import { buildCreate, buildLocalMentionTags } from "./notes.ts";
 import { VERSION } from "./version.ts";
 
 function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[]\\]/g, "\\$&");
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export interface ApiDeps {

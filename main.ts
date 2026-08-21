@@ -400,7 +400,12 @@ export default {
       );
       const sorted = posts.sort((a, b) => b.published.localeCompare(a.published));
       return new Response(landingHtml(origin, actors, sorted, graph), {
-        headers: { "content-type": "text/html; charset=utf-8" },
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "x-content-type-options": "nosniff",
+          "x-frame-options": "DENY",
+          "referrer-policy": "no-referrer",
+        },
       });
     }
 
