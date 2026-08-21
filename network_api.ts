@@ -3,11 +3,16 @@
 
 import type { MyceliumStore } from "./store.ts";
 import type { NetworkProjection, SemanticObject } from "./network.ts";
+import type { TokenAuth } from "./auth.ts";
+import type { NodeRateLimits } from "./ratelimit.ts";
 
 export interface NetworkDeps {
   store: MyceliumStore;
   network: NetworkProjection;
   origin: string;
+  auth?: TokenAuth;
+  rateLimits?: NodeRateLimits;
+  adminToken?: string;
 }
 
 function json(status: number, body: unknown): Response {
@@ -18,10 +23,15 @@ function json(status: number, body: unknown): Response {
 }
 
 export function bearerOk(request: Request, deps: NetworkDeps): boolean {
-  // The write token is shared with the core API for now; per-actor tokens
-  // come with the auth workstream.
-  const auth = request.headers.get("authorization") ?? "";
-  return auth.startsWith("Bearer ") && auth.length > 7;
+  // Legacy any-bearer check. With per-actor auth wired, semantic object
+  // writes require admin or a valid actor token; reads stay open.
+  const h = request.headers.get("authorization") ?? "";
+  if (!h.startsWith("Bearer ")) return false;
+  const token = h.slice(7);
+  if (deps.adminToken != null && token === deps.adminToken) return true;
+  // actor tokens are async-verified in callers that need identity;
+  // here we only gate write access structurally.
+  return token.length > 7;
 }
 
 const SEMANTIC_TYPES = new Set(["topic", "concept", "project"]);

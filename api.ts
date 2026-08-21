@@ -11,6 +11,10 @@ import type {
   PostRecord,
 } from "./store.ts";
 import { buildCreate, buildLocalMentionTags } from "./notes.ts";
+import { TokenAuth } from "./auth.ts";
+import type { NodeRateLimits } from "./ratelimit.ts";
+import { clientKey } from "./ratelimit.ts";
+import { assertFederatable, assertFederatableHost } from "./ssrf.ts";
 import { VERSION } from "./version.ts";
 
 function escapeRe(s: string): string {
@@ -21,21 +25,9 @@ export interface ApiDeps {
   store: MyceliumStore;
   federation: Federation<void>;
   origin: string;
-}
-
-let apiToken: string | null = null;
-
-export function getToken(): string | null {
-  return apiToken;
-}
-
-export async function loadToken(path: string): Promise<void> {
-  try {
-    apiToken = (await Deno.readTextFile(path)).trim();
-  } catch {
-    apiToken = null;
-    console.warn(`api: no token file at ${path}; write endpoints disabled`);
-  }
+  auth: TokenAuth;
+  rateLimits: NodeRateLimits;
+  adminToken: string;
 }
 
 function json(status: number, body: unknown): Response {
@@ -45,10 +37,32 @@ function json(status: number, body: unknown): Response {
   });
 }
 
-function authorized(request: Request): boolean {
-  if (apiToken == null || apiToken === "") return false;
+function bearer(request: Request): string | null {
   const auth = request.headers.get("authorization") ?? "";
-  return auth === `Bearer ${apiToken}`;
+  return auth.startsWith("Bearer ") ? auth.slice(7) : null;
+}
+
+/** Admin (operator) authorization — token management + bootstrap only. */
+function isAdmin(request: Request, deps: ApiDeps): boolean {
+  const t = bearer(request);
+  return t != null && t === deps.adminToken;
+}
+
+/** Authenticate the request as a SPECIFIC actor via per-actor token. */
+async function requireActor(
+  request: Request,
+  deps: ApiDeps,
+  identifier: string,
+): Promise<boolean> {
+  const t = bearer(request);
+  if (t == null) return false;
+  if (t === deps.adminToken) return true; // operator may act as any local actor
+  const actor = await deps.auth.authenticate(t);
+  return actor === identifier;
+}
+
+function tooMany(): Response {
+  return json(429, { error: "rate limit exceeded" });
 }
 
 const MAX_CONTENT = 5000;
@@ -75,7 +89,7 @@ export async function handleApi(
   }
 
   if (path === "/api/actor" && request.method === "POST") {
-    if (!authorized(request)) return json(401, { error: "unauthorized" });
+    if (!isAdmin(request, deps)) return json(401, { error: "admin token required" });
     let body: Record<string, unknown>;
     try {
       body = await request.json();
@@ -113,7 +127,7 @@ export async function handleApi(
   }
 
   if (path === "/api/post" && request.method === "POST") {
-    if (!authorized(request)) return json(401, { error: "unauthorized" });
+    if (!deps.rateLimits.write.allow(clientKey(request))) return tooMany();
     let body: Record<string, unknown>;
     try {
       body = await request.json();
@@ -122,6 +136,9 @@ export async function handleApi(
     }
     const identifier = String(body.identifier ?? "").trim().toLowerCase();
     const content = String(body.content ?? "").trim();
+    if (!(await requireActor(request, deps, identifier))) {
+      return json(401, { error: "unauthorized for actor: " + identifier });
+    }
     const inReplyTo = body.inReplyTo == null
       ? undefined
       : String(body.inReplyTo).trim();
@@ -261,7 +278,7 @@ export async function handleApi(
 
   // ── like / boost ──
   if (path === "/api/react" && request.method === "POST") {
-    if (!authorized(request)) return json(401, { error: "unauthorized" });
+    if (!deps.rateLimits.write.allow(clientKey(request))) return tooMany();
     let body: Record<string, unknown>;
     try {
       body = await request.json();
@@ -270,6 +287,9 @@ export async function handleApi(
     }
     const identifier = String(body.identifier ?? "").trim().toLowerCase();
     const postId = String(body.postId ?? "").trim();
+    if (!(await requireActor(request, deps, identifier))) {
+      return json(401, { error: "unauthorized for actor: " + identifier });
+    }
     const kind = String(body.kind ?? "like").trim();
     const remove = body.remove === true;
     if (!identifier || !postId) {
@@ -372,7 +392,6 @@ export async function handleApi(
   }
 
   if (path === "/api/notifications/read" && request.method === "POST") {
-    if (!authorized(request)) return json(401, { error: "unauthorized" });
     let body: Record<string, unknown>;
     try {
       body = await request.json();
@@ -381,6 +400,9 @@ export async function handleApi(
     }
     const identifier = String(body.identifier ?? "").trim().toLowerCase();
     const id = body.id == null ? null : String(body.id);
+    if (!(await requireActor(request, deps, identifier))) {
+      return json(401, { error: "unauthorized for actor: " + identifier });
+    }
     if (!identifier) return json(400, { error: "identifier required" });
     if (id == null) {
       await deps.store.markAllNotificationsRead(identifier);
@@ -392,7 +414,7 @@ export async function handleApi(
 
   // ── outbound follow ──
   if (path === "/api/follow" && request.method === "POST") {
-    if (!authorized(request)) return json(401, { error: "unauthorized" });
+    if (!deps.rateLimits.federation.allow(clientKey(request))) return tooMany();
     let body: Record<string, unknown>;
     try {
       body = await request.json();
@@ -402,6 +424,9 @@ export async function handleApi(
     const identifier = String(body.identifier ?? "").trim().toLowerCase();
     const target = String(body.target ?? "").trim(); // actor URI or @name@host
     const remove = body.remove === true;
+    if (!(await requireActor(request, deps, identifier))) {
+      return json(401, { error: "unauthorized for actor: " + identifier });
+    }
     if (!identifier || !target) {
       return json(400, { error: "identifier and target required" });
     }
@@ -413,11 +438,21 @@ export async function handleApi(
     let targetUri: URL;
     if (/^https?:\/\//.test(target)) {
       targetUri = new URL(target);
+      try {
+        assertFederatable(targetUri);
+      } catch (e) {
+        return json(400, { error: String(e instanceof Error ? e.message : e) });
+      }
     } else if (/^@?[a-z0-9_]{1,64}@([a-z0-9.-]+)$/i.test(target)) {
       const handle = target.replace(/^@/, "");
       const at = handle.indexOf("@");
       const name = handle.slice(0, at);
       const host = handle.slice(at + 1);
+      try {
+        assertFederatableHost(host);
+      } catch (e) {
+        return json(400, { error: String(e instanceof Error ? e.message : e) });
+      }
       // Mastodon-style actor URI via webfinger-less heuristic:
       // resolve through Fedify lookupObject with acct uri
       const ctx = deps.federation.createContext(new URL(deps.origin), undefined);
@@ -426,6 +461,11 @@ export async function handleApi(
         return json(404, { error: `cannot resolve ${target}` });
       }
       targetUri = actor.id;
+      try {
+        assertFederatable(targetUri);
+      } catch (e) {
+        return json(400, { error: String(e instanceof Error ? e.message : e) });
+      }
     } else {
       return json(400, { error: "target must be an actor URI or @name@host" });
     }
@@ -520,6 +560,60 @@ export async function handleApi(
       likeCount: likes.length,
       boostCount: boosts.length,
     });
+  }
+
+  // ── token management (admin only) ──
+  if (path === "/api/token/issue" && request.method === "POST") {
+    if (!isAdmin(request, deps)) return json(401, { error: "admin token required" });
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch {
+      return json(400, { error: "invalid json" });
+    }
+    const identifier = String(body.identifier ?? "").trim().toLowerCase();
+    if (!/^[a-z0-9_]{1,64}$/.test(identifier)) {
+      return json(400, { error: "identifier must match [a-z0-9_]{1,64}" });
+    }
+    if (await deps.store.getActor(identifier) == null) {
+      return json(404, { error: "unknown actor" });
+    }
+    const token = await deps.auth.issue(identifier);
+    return json(201, { ok: true, identifier, token });
+  }
+
+  if (path === "/api/token/revoke" && request.method === "POST") {
+    if (!isAdmin(request, deps)) return json(401, { error: "admin token required" });
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch {
+      return json(400, { error: "invalid json" });
+    }
+    const identifier = String(body.identifier ?? "").trim().toLowerCase();
+    const token = body.token == null ? null : String(body.token);
+    if (!identifier) return json(400, { error: "identifier required" });
+    const revoked = await deps.auth.revoke(identifier, token ?? undefined);
+    return json(200, { ok: true, revoked });
+  }
+
+  if (path === "/api/token/list" && request.method === "GET") {
+    if (!isAdmin(request, deps)) return json(401, { error: "admin token required" });
+    const identifier = (url.searchParams.get("actor") ?? "").trim().toLowerCase();
+    const tokens = await deps.auth.list(identifier || undefined);
+    return json(200, { count: tokens.length, tokens });
+  }
+
+  // ── who am i (per-actor token introspection) ──
+  if (path === "/api/whoami" && request.method === "GET") {
+    const t = bearer(request);
+    if (t == null) return json(401, { error: "bearer token required" });
+    if (t === deps.adminToken) {
+      return json(200, { actor: null, role: "admin" });
+    }
+    const actor = await deps.auth.authenticate(t);
+    if (actor == null) return json(401, { error: "invalid token" });
+    return json(200, { actor, role: "actor" });
   }
 
   return json(404, { error: "not found" });

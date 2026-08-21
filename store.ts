@@ -1,5 +1,9 @@
 // Mycelium Store — KV persistence. Namespace: _mycelium/
 // Original code. MIT license. Keys stored as JWK per Fedify manual pattern.
+// Private keys encrypted at rest (AES-256-GCM) since v0.6.0; legacy plaintext
+// records migrate transparently on first read.
+
+import { KeyEnvelope, sealJson, openJson, type EncryptedBlob } from "./crypto.ts";
 
 export type ActorClass =
   | "person"
@@ -46,8 +50,19 @@ export interface FollowerRecord {
 
 const NS = ["_mycelium"];
 
+function isEncrypted(v: unknown): v is EncryptedBlob {
+  return typeof v === "object" && v !== null && (v as { enc?: unknown }).enc === true;
+}
+
 export class MyceliumStore {
+  private envelope: KeyEnvelope | null = null;
+
   constructor(private kv: Deno.Kv) {}
+
+  /** Attach a key envelope for at-rest private key encryption. */
+  setKeyEnvelope(envelope: KeyEnvelope): void {
+    this.envelope = envelope;
+  }
 
   // ── actors ──
   async getActor(identifier: string): Promise<ActorRecord | null> {
@@ -66,13 +81,41 @@ export class MyceliumStore {
     return out;
   }
 
-  // ── keys (JWK) ──
+  // ── keys (JWK, encrypted at rest) ──
   async getKeys(identifier: string): Promise<StoredKeyPair | null> {
-    return (await this.kv.get<StoredKeyPair>([...NS, "key", identifier])).value;
+    const raw = (await this.kv.get<StoredKeyPair | EncryptedBlob>([...NS, "key", identifier])).value;
+    if (raw == null) return null;
+    if (!isEncrypted(raw)) return raw; // legacy plaintext — migrate on write path
+    if (this.envelope == null) {
+      throw new Error("store: encrypted key present but no envelope loaded");
+    }
+    return await openJson<StoredKeyPair>(this.envelope, raw);
   }
 
   async putKeys(identifier: string, keys: StoredKeyPair): Promise<void> {
-    await this.kv.set([...NS, "key", identifier], keys);
+    if (this.envelope == null) {
+      await this.kv.set([...NS, "key", identifier], keys); // tests / no-envelope mode
+      return;
+    }
+    const blob = await sealJson(this.envelope, keys);
+    await this.kv.set([...NS, "key", identifier], blob);
+  }
+
+  /** One-time migration: encrypt any legacy plaintext keys. */
+  async migrateKeysToEncrypted(): Promise<number> {
+    if (this.envelope == null) return 0;
+    let migrated = 0;
+    for await (
+      const e of this.kv.list<StoredKeyPair | EncryptedBlob>({
+        prefix: [...NS, "key"],
+      })
+    ) {
+      if (isEncrypted(e.value)) continue;
+      const identifier = String(e.key[e.key.length - 1]);
+      await this.putKeys(identifier, e.value);
+      migrated++;
+    }
+    return migrated;
   }
 
   // ── followers ──

@@ -21,7 +21,10 @@ import {
 // Accept handles remote acceptances of our outbound Follow activities.
 import { DenoKvMessageQueue, DenoKvStore } from "@fedify/denokv";
 import { bootstrapActors, buildActorDoc, ensureKeyPairs } from "./actors.ts";
-import { handleApi, getToken, loadToken } from "./api.ts";
+import { handleApi } from "./api.ts";
+import { TokenAuth } from "./auth.ts";
+import { KeyEnvelope } from "./crypto.ts";
+import { NodeRateLimits } from "./ratelimit.ts";
 import { MyceliumStore, type PostRecord } from "./store.ts";
 import { buildNote, buildCreate } from "./notes.ts";
 import { NetworkProjection, migrateKg } from "./network.ts";
@@ -31,13 +34,40 @@ import { landingHtml } from "./landing.ts";
 import { VERSION } from "./version.ts";
 
 const DATA_DIR = Deno.env.get("DATA_DIR") ?? "./data";
-const TOKEN_FILE = Deno.env.get("MYCELIUM_TOKEN_FILE") ?? `${DATA_DIR}/api_token`;
 const kv = await Deno.openKv(`${DATA_DIR}/mycelium.db`);
 const store = new MyceliumStore(kv);
 const network = new NetworkProjection(kv);
 await migrateKg(kv); // one-time: legacy kg entities -> semantic objects
 await bootstrapActors(store);
-await loadToken(TOKEN_FILE);
+
+// ── Security: key envelope (AES-256-GCM at rest) + per-actor tokens ──
+const envelope = new KeyEnvelope();
+await envelope.loadOrGenerate(`${DATA_DIR}/master.key`);
+store.setKeyEnvelope(envelope);
+const migratedKeys = await store.migrateKeysToEncrypted();
+if (migratedKeys > 0) {
+  console.log(`crypto: migrated ${migratedKeys} plaintext key(s) to encrypted`);
+}
+const auth = new TokenAuth(kv);
+const rateLimits = new NodeRateLimits();
+
+// Operator admin token — bootstrap + token management only (issue/revoke).
+// Loaded from data/admin_token; regenerated when absent.
+const ADMIN_TOKEN_FILE = `${DATA_DIR}/admin_token`;
+let adminToken: string;
+try {
+  adminToken = (await Deno.readTextFile(ADMIN_TOKEN_FILE)).trim();
+  if (!adminToken) throw new Error("empty");
+} catch {
+  const raw = crypto.getRandomValues(new Uint8Array(32));
+  let bin = "";
+  for (const b of raw) bin += String.fromCharCode(b);
+  adminToken = btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  await Deno.writeTextFile(ADMIN_TOKEN_FILE, adminToken + "\n");
+  try { await Deno.chmod(ADMIN_TOKEN_FILE, 0o600); } catch { /* best effort */ }
+  console.warn("auth: generated new admin token at " + ADMIN_TOKEN_FILE);
+}
+
 const origin = Deno.env.get("ORIGIN") ?? "https://taproot.basednut.com";
 
 const federation = createFederation<void>({
@@ -366,7 +396,7 @@ export default {
     }
 
     if (url.pathname.startsWith("/api/network/")) {
-      return await handleNetwork(request, { store, network, origin });
+      return await handleNetwork(request, { store, network, origin, auth, rateLimits });
     }
 
     // Legacy KG endpoints are superseded by the network projection API.
@@ -384,7 +414,14 @@ export default {
     }
 
     if (url.pathname.startsWith("/api/")) {
-      return await handleApi(request, { store, federation, origin });
+      return await handleApi(request, {
+        store,
+        federation,
+        origin,
+        auth,
+        rateLimits,
+        adminToken,
+      });
     }
 
     if (url.pathname === "/" || url.pathname === "/index.html") {
