@@ -6,6 +6,7 @@
 
 import {
   createFederation,
+  getDocumentLoader,
   importJwk,
   type PageItems,
 } from "@fedify/fedify";
@@ -26,10 +27,11 @@ import { TokenAuth } from "./auth.ts";
 import { KeyEnvelope } from "./crypto.ts";
 import { NodeRateLimits } from "./ratelimit.ts";
 import { MyceliumStore, type PostRecord } from "./store.ts";
-import { buildNote, buildCreate } from "./notes.ts";
+import { buildNote, buildCreate, classifyVisibility } from "./notes.ts";
 import { NetworkProjection, migrateKg } from "./network.ts";
 import { handleNetwork } from "./network_api.ts";
 import { skillMd } from "./skill_md.ts";
+import { assertFederatable } from "./ssrf.ts";
 import { landingHtml } from "./landing.ts";
 import { VERSION } from "./version.ts";
 
@@ -70,11 +72,26 @@ try {
 
 const origin = Deno.env.get("ORIGIN") ?? "https://taproot.basednut.com";
 
+// SSRF-hardened document loader: ALL federation-side dereferences (remote
+// actor/object fetches triggered by inbox handlers) pass the same private-
+// host guard as user-initiated federation (audit HIGH: asymmetric SSRF —
+// inbox paths fetched attacker-supplied URIs unchecked).
 const federation = createFederation<void>({
   kv: new DenoKvStore(kv),
   queue: new DenoKvMessageQueue(kv),
   origin,
-  userAgent: `Mycelium/${VERSION}`,
+  // fedify 2.3.4 forbids documentLoaderFactory alongside top-level
+  // userAgent/allowPrivateAddress — the factory must own both.
+  documentLoaderFactory: (opts) => {
+    const loader = getDocumentLoader({
+      userAgent: opts?.userAgent ?? `Mycelium/${VERSION}`,
+      allowPrivateAddress: false,
+    });
+    return async (url: string) => {
+      await assertFederatable(new URL(url));
+      return loader(url);
+    };
+  },
 });
 
 // ── Actor + keys ──
@@ -238,16 +255,26 @@ federation
     const object = await create.getObject();
     if (!(object instanceof Note)) return;
     const author = create.actorId?.href ?? "unknown";
+    const jsonLd = await object.toJsonLd();
+    // Privacy: only content explicitly addressed to as:Public is public;
+    // everything else is stored followers/direct and never rendered on
+    // public surfaces (audit CRITICAL: unconditional visibility:"public"
+    // disclosed private remote content via landing page + feed).
+    const visibility = classifyVisibility(jsonLd as Record<string, unknown>);
+    // Bounds: remote content is capped like local posts (audit: unbounded
+    // remote KV writes).
+    const MAX_REMOTE_CONTENT = 20000;
+    const MAX_REMOTE_TITLE = 500;
     // Store idempotently: remote retries overwrite the same key.
     const post: PostRecord = {
       id: object.id?.href ?? crypto.randomUUID(),
       identifier: author,
-      content: object.content?.toString() ?? "",
+      content: (object.content?.toString() ?? "").slice(0, MAX_REMOTE_CONTENT),
       published: object.published?.toString() ?? new Date().toISOString(),
       inReplyTo: object.replyTargetId?.href,
-      visibility: "public",
+      visibility,
       form: "short",
-      title: object.name?.toString(),
+      title: object.name?.toString()?.slice(0, MAX_REMOTE_TITLE),
       isRemote: true,
     };
     await store.putPost(post);
@@ -280,7 +307,7 @@ federation
         }
       }
       // Mention notifications: read tag[] hrefs from the wire format.
-      const jsonLd = await object.toJsonLd();
+      // (jsonLd hoisted above for visibility classification)
       const rawTag = (jsonLd as Record<string, unknown>).tag;
       const tags = Array.isArray(rawTag)
         ? rawTag as Record<string, unknown>[]
@@ -425,17 +452,24 @@ export default {
     }
 
     if (url.pathname === "/" || url.pathname === "/index.html") {
-      const [actors, posts] = await Promise.all([
+      const [actors, allPosts] = await Promise.all([
         store.listActors(),
         store.listPosts(null),
       ]);
+      // Only public/unlisted remote posts render on the public landing page
+      // (audit CRITICAL: private remote content disclosure).
+      const posts = allPosts.filter((p) =>
+        p.isRemote !== true || p.visibility === "public" ||
+        p.visibility === "unlisted"
+      );
       const graph = await network.build(
         actors,
         posts,
         async (id) =>
           (await store.getFollowers(id)).map((f) => f.followerId),
+        async (id) => store.listFollowing(id),
       );
-      const sorted = posts.sort((a, b) => b.published.localeCompare(a.published));
+      const sorted = posts.slice().sort((a, b) => b.published.localeCompare(a.published));
       // Author class per post so the GUI avatar reflects the actor, not a
       // hardcoded agent glyph (audit fix).
       const classByActor = new Map(actors.map((a) => [a.identifier, a.actorClass]));
@@ -443,12 +477,20 @@ export default {
         ...p,
         actorClass: p.isRemote === true ? "remote" : classByActor.get(p.identifier),
       }));
-      return new Response(landingHtml(origin, actors, enriched, graph), {
+      // Per-response CSP nonce: inline script is nonce-gated; injected
+      // script without the nonce cannot execute (audit: no CSP).
+      const cspNonce = crypto.randomUUID().replace(/-/g, "");
+      return new Response(landingHtml(origin, actors, enriched, graph, cspNonce), {
         headers: {
           "content-type": "text/html; charset=utf-8",
           "x-content-type-options": "nosniff",
           "x-frame-options": "DENY",
           "referrer-policy": "no-referrer",
+          "content-security-policy":
+            "default-src 'self'; script-src 'self' 'nonce-" + cspNonce +
+            "'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
+            "connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; " +
+            "form-action 'self'",
         },
       });
     }

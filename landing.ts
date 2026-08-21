@@ -34,7 +34,10 @@ export function landingHtml(
   actors: LandingActor[],
   posts: LandingPost[],
   graph: NetworkGraph,
+  cspNonce?: string,
 ): string {
+  // CSP nonce gates the inline script; without it the header would block it.
+  const nonceAttr = cspNonce != null ? ` nonce="${cspNonce}"` : "";
   const host = new URL(origin).host;
   const esc = (s: string) =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;")
@@ -226,7 +229,7 @@ h2.view-title { font: 600 18px Georgia, serif; color: var(--hi); margin: 4px 0 1
 </footer>
 </div>
 <script type="application/json" id="graph-data">${graphJson}</script>
-<script>
+<script${nonceAttr}>
 (function () {
   "use strict";
   var RAW = JSON.parse(document.getElementById("graph-data").textContent);

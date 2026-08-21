@@ -94,3 +94,20 @@ export function buildCreate(
     ccs,
   });
 }
+
+
+// Remote visibility classification (audit CRITICAL fix).
+// ActivityPub: only content addressed to as:Public is inherently public.
+const AP_PUBLIC = "https://www.w3.org/ns/activitystreams#Public";
+
+export function classifyVisibility(
+  jsonLd: Record<string, unknown>,
+): "public" | "unlisted" | "followers" | "direct" {
+  const arr = (v: unknown): string[] =>
+    Array.isArray(v) ? v.map(String) : v != null ? [String(v)] : [];
+  const to = arr(jsonLd.to);
+  const cc = arr(jsonLd.cc);
+  if (to.includes(AP_PUBLIC)) return "public";
+  if (cc.includes(AP_PUBLIC)) return "unlisted";
+  return "followers"; // safest default for non-public addressing
+}

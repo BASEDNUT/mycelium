@@ -66,9 +66,13 @@ export class NodeRateLimits {
 }
 
 export function clientKey(request: Request): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "local"
-  );
+  // Rightmost XFF entry: the trusted reverse proxy APPENDS the real client
+  // IP; leftmost is client-spoofable (audit: XFF spoof bypasses limits).
+  // Assumes exactly one trusted proxy hop in front of the node.
+  const xff = request.headers.get("x-forwarded-for");
+  if (xff != null) {
+    const parts = xff.split(",").map((s) => s.trim()).filter(Boolean);
+    if (parts.length > 0) return parts[parts.length - 1];
+  }
+  return request.headers.get("x-real-ip") ?? "local";
 }

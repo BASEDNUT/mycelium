@@ -278,6 +278,12 @@ export async function handleApi(
     const posts = (await deps.store.listPosts(identifier))
       .filter((p) => form == null || (p.form ?? "short") === form)
       .filter((p) => p.isRemote !== true || p.identifier === identifier)
+      // Remote posts surface publicly only when explicitly public/unlisted
+      // (audit CRITICAL: private remote content disclosure via feed).
+      .filter((p) =>
+        p.isRemote !== true || p.visibility === "public" ||
+        p.visibility === "unlisted"
+      )
       .sort((a, b) => b.published.localeCompare(a.published))
       .slice(0, limit);
     return json(200, { count: posts.length, posts });

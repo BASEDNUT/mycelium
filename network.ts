@@ -67,6 +67,7 @@ export interface SemanticObject {
   tags: string[];
   linkedActor?: string;
   linkedPost?: string;
+  createdBy?: string; // provenance: authenticated actor (or __admin__)
   created: string;
 }
 
@@ -77,6 +78,7 @@ export interface SemanticLink {
   relation: string; // semantic relation label (about, uses, part-of, ...)
   weight: number;
   note?: string;
+  createdBy?: string; // provenance: authenticated actor (or __admin__)
   created: string;
 }
 
@@ -124,6 +126,14 @@ export class NetworkProjection {
     await this.kv.set([...NS, "semLink", l.id], l);
   }
 
+  async getSemanticLink(id: string): Promise<SemanticLink | null> {
+    return (await this.kv.get<SemanticLink>([...NS, "semLink", id])).value;
+  }
+
+  async deleteSemanticLink(id: string): Promise<void> {
+    await this.kv.delete([...NS, "semLink", id]);
+  }
+
   async listSemanticLinks(): Promise<SemanticLink[]> {
     const out: SemanticLink[] = [];
     for await (
@@ -137,6 +147,10 @@ export class NetworkProjection {
     actors: ActorRecord[],
     posts: PostRecord[],
     followersOf: (identifier: string) => Promise<string[]>,
+    followingOf?: (identifier: string) => Promise<{
+      identifier: string;
+      targetId: string;
+    }[]>,
   ): Promise<NetworkGraph> {
     const nodes: GraphNode[] = [];
     const edges: GraphEdge[] = [];
@@ -173,6 +187,27 @@ export class NetworkProjection {
           to: nodeId,
           kind: "publishes",
           weight: 5,
+        });
+      } else if (isRemote) {
+        // Remote post authors become actor nodes so the graph is a complete
+        // projection of stored state (audit HIGH: remote authors missing).
+        const m = author.match(/^https?:\/\/([^/]+)\/(?:users|ap\/actor)\/([^/]+)$/);
+        const remoteAuthorId = m ? `actor:${m[2]}@${m[1]}` : `actor:${author}`;
+        const remoteLabel = m ? `@${m[2]}@${m[1]}` : author.slice(0, 24);
+        if (!nodes.some((n) => n.id === remoteAuthorId)) {
+          nodes.push({
+            id: remoteAuthorId,
+            kind: "actor",
+            subkind: "remote",
+            label: remoteLabel,
+            detail: author,
+          });
+        }
+        edges.push({
+          from: remoteAuthorId,
+          to: nodeId,
+          kind: "publishes",
+          weight: 4,
         });
       }
     }
@@ -250,6 +285,45 @@ export class NetworkProjection {
           kind: "follows",
           weight: 4,
         });
+      }
+    }
+
+    // Outbound follows (local actor -> remote target) — audit HIGH: the
+    // projection consumed incoming followers but never stored FollowingRecords.
+    if (followingOf != null) {
+      for (const a of actors) {
+        for (const f of await followingOf(a.identifier)) {
+          const m = f.targetId.match(
+            /^https?:\/\/([^/]+)\/(?:users|ap\/actor)\/([^/]+)$/,
+          );
+          let targetNodeId: string;
+          let label: string;
+          if (m) {
+            targetNodeId = `actor:${m[2]}@${m[1]}`;
+            label = `@${m[2]}@${m[1]}`;
+          } else if (actorIds.has(f.targetId)) {
+            targetNodeId = `actor:${f.targetId}`;
+            label = f.targetId;
+          } else {
+            targetNodeId = `actor:${f.targetId}`;
+            label = f.targetId.slice(0, 24);
+          }
+          if (!nodes.some((n) => n.id === targetNodeId)) {
+            nodes.push({
+              id: targetNodeId,
+              kind: "actor",
+              subkind: "remote",
+              label,
+              detail: f.targetId,
+            });
+          }
+          edges.push({
+            from: `actor:${a.identifier}`,
+            to: targetNodeId,
+            kind: "follows",
+            weight: 3,
+          });
+        }
       }
     }
 

@@ -1,8 +1,8 @@
 // Network projection API — graph as derived view of canonical state.
 // Original code. MIT license.
 
-import type { MyceliumStore } from "./store.ts";
-import type { NetworkProjection, SemanticObject } from "./network.ts";
+import type { MyceliumStore, PostRecord } from "./store.ts";
+import type { NetworkProjection, SemanticObject, SemanticLink } from "./network.ts";
 import type { TokenAuth } from "./auth.ts";
 import type { NodeRateLimits } from "./ratelimit.ts";
 
@@ -47,6 +47,35 @@ function readLimited(request: Request, deps: NetworkDeps): boolean {
   return deps.rateLimits?.read.allow(clientKey(request)) === false;
 }
 
+/** Write-path rate limit for semantic writes (audit MEDIUM: write limiter
+ *  covered post/react/follow but NOT network object/link — unthrottled spam). */
+function writeLimited(request: Request, deps: NetworkDeps): boolean {
+  return deps.rateLimits?.write.allow(clientKey(request)) === false;
+}
+
+/** Authenticated identity for provenance: "__admin__" or actor identifier.
+ *  null = unauthenticated. (audit HIGH: semantic writes had no provenance.) */
+export async function authenticatedActor(
+  request: Request,
+  deps: NetworkDeps,
+): Promise<string | null> {
+  const h = request.headers.get("authorization") ?? "";
+  if (!h.startsWith("Bearer ")) return null;
+  const token = h.slice(7);
+  if (deps.adminToken != null && token === deps.adminToken) return "__admin__";
+  if (deps.auth == null) return null;
+  return await deps.auth.authenticate(token);
+}
+
+/** Public-surface post filter: remote posts render only when explicitly
+ *  public/unlisted (audit CRITICAL: private remote content disclosure). */
+function visiblePosts(posts: PostRecord[]): PostRecord[] {
+  return posts.filter((p) =>
+    p.isRemote !== true || p.visibility === "public" ||
+    p.visibility === "unlisted"
+  );
+}
+
 export async function handleNetwork(
   request: Request,
   deps: NetworkDeps,
@@ -58,14 +87,15 @@ export async function handleNetwork(
   // Full graph projection
   if (path === "/api/network/graph" && request.method === "GET") {
     if (readLimited(request, deps)) return json(429, { error: "rate limit exceeded" });
-    const [actors, posts] = await Promise.all([
+    const [actors, allPosts] = await Promise.all([
       store.listActors(),
       store.listPosts(null),
     ]);
     const graph = await network.build(
       actors,
-      posts,
+      visiblePosts(allPosts),
       async (id) => (await store.getFollowers(id)).map((f) => f.followerId),
+      async (id) => store.listFollowing(id),
     );
     return json(200, graph);
   }
@@ -80,7 +110,9 @@ export async function handleNetwork(
 
   // Create semantic object
   if (path === "/api/network/object" && request.method === "POST") {
-    if (!(await bearerOk(request, deps))) return json(401, { error: "unauthorized" });
+    const creator = await authenticatedActor(request, deps);
+    if (creator == null) return json(401, { error: "unauthorized" });
+    if (writeLimited(request, deps)) return json(429, { error: "rate limit exceeded" });
     let body: Record<string, unknown>;
     try {
       body = await request.json();
@@ -120,6 +152,7 @@ export async function handleNetwork(
       tags,
       linkedActor,
       linkedPost,
+      createdBy: creator,
       created: new Date().toISOString(),
     };
     await network.putSemanticObject(obj);
@@ -128,7 +161,9 @@ export async function handleNetwork(
 
   // Semantic link between objects
   if (path === "/api/network/link" && request.method === "POST") {
-    if (!(await bearerOk(request, deps))) return json(401, { error: "unauthorized" });
+    const creator = await authenticatedActor(request, deps);
+    if (creator == null) return json(401, { error: "unauthorized" });
+    if (writeLimited(request, deps)) return json(429, { error: "rate limit exceeded" });
     let body: Record<string, unknown>;
     try {
       body = await request.json();
@@ -156,10 +191,41 @@ export async function handleNetwork(
       relation,
       weight,
       note: note || undefined,
+      createdBy: creator,
       created: new Date().toISOString(),
     };
     await network.putSemanticLink(link);
     return json(201, { ok: true, link });
+  }
+
+  // Moderation: delete semantic object (admin or creator only)
+  if (path.startsWith("/api/network/object/") && request.method === "DELETE") {
+    const caller = await authenticatedActor(request, deps);
+    if (caller == null) return json(401, { error: "unauthorized" });
+    const id = decodeURIComponent(path.slice("/api/network/object/".length));
+    const obj = await network.getSemanticObject(id);
+    if (obj == null) return json(404, { error: "object not found" });
+    if (caller !== "__admin__" && obj.createdBy != null &&
+        obj.createdBy !== caller) {
+      return json(403, { error: "only creator or admin may delete" });
+    }
+    await network.deleteSemanticObject(id);
+    return json(200, { ok: true, deleted: id });
+  }
+
+  // Moderation: delete semantic link (admin or creator only)
+  if (path.startsWith("/api/network/link/") && request.method === "DELETE") {
+    const caller = await authenticatedActor(request, deps);
+    if (caller == null) return json(401, { error: "unauthorized" });
+    const id = decodeURIComponent(path.slice("/api/network/link/".length));
+    const link = await network.getSemanticLink(id);
+    if (link == null) return json(404, { error: "link not found" });
+    if (caller !== "__admin__" && link.createdBy != null &&
+        link.createdBy !== caller) {
+      return json(403, { error: "only creator or admin may delete" });
+    }
+    await network.deleteSemanticLink(id);
+    return json(200, { ok: true, deleted: id });
   }
 
   // ── per-node navigation APIs (graph-as-navigation, v0.5) ──
@@ -179,14 +245,15 @@ export async function handleNetwork(
       200,
     );
 
-    const [actors, posts] = await Promise.all([
+    const [actors, allPosts] = await Promise.all([
       store.listActors(),
       store.listPosts(null),
     ]);
     const graph = await network.build(
       actors,
-      posts,
+      visiblePosts(allPosts),
       async (id) => (await store.getFollowers(id)).map((f) => f.followerId),
+      async (id) => store.listFollowing(id),
     );
 
     const node = graph.nodes.find((n) => n.id === rawId);
@@ -195,9 +262,17 @@ export async function handleNetwork(
     }
 
     const nodeMap = new Map(graph.nodes.map((n) => [n.id, n]));
+    // Filter matches edge.kind OR the original relation label: semantic
+    // links collapse to about/relates-to kinds but keep label=relation
+    // (audit MEDIUM: ?relation=part-of never matched anything).
     const edges = graph.edges.filter((e) => {
       if (e.from !== rawId && e.to !== rawId) return false;
-      if (relFilter.length > 0 && !relFilter.includes(e.kind)) return false;
+      if (relFilter.length > 0 && e.label == null &&
+          !relFilter.includes(e.kind)) return false;
+      if (relFilter.length > 0 && e.label != null &&
+          !relFilter.includes(e.kind) && !relFilter.includes(e.label)) {
+        return false;
+      }
       return true;
     }).slice(0, limit);
 
@@ -230,7 +305,26 @@ export async function handleNetwork(
     if (kind === "actor") {
       const actor = await store.getActor(key);
       if (actor == null) {
-        return json(404, { error: "actor not found" });
+        // Remote actor (name@host / URI): serve the graph projection node
+        // instead of 404 (audit: remote actor navigation broke the GUI).
+        const [as2, ap2] = await Promise.all([
+          store.listActors(),
+          store.listPosts(null),
+        ]);
+        const g2 = await network.build(
+          as2,
+          visiblePosts(ap2),
+          async (id) => (await store.getFollowers(id)).map((f) => f.followerId),
+          async (id) => store.listFollowing(id),
+        );
+        const rn = g2.nodes.find((n) => n.id === rawId);
+        if (rn == null) return json(404, { error: "actor not found" });
+        return json(200, {
+          node: rn,
+          actor: null,
+          remote: true,
+          detail: rn.detail ?? "",
+        });
       }
       const posts = (await store.listPosts(key)).slice(0, 50);
       const followers = await store.getFollowers(key);
