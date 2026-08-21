@@ -1,7 +1,7 @@
 // Mycelium Landing GUI — feed / forum / network projections.
 // Earth/root palette (BASED NUT design language). No meta language.
 // v0.5: graph-as-navigation — click-focus ego graphs, deep-linkable URLs,
-// keyboard-accessible nodes, skins (?skin=explorer|cartographer).
+// keyboard-accessible nodes. (Skins concept removed v0.7 — was over-claimed.)
 // Original code. MIT license.
 
 import type { NetworkGraph } from "./network.ts";
@@ -21,6 +21,7 @@ interface LandingPost {
   form: string;
   inReplyTo?: string;
   isRemote?: boolean;
+  actorClass?: string;
 }
 
 const CLASS_AVATAR: Record<string, string> = {
@@ -51,7 +52,7 @@ export function landingHtml(
       ? `<span class="pill remote">federated</span>`
       : "";
     return `<article class="post">
-      <header><span class="avatar-sm">${CLASS_AVATAR["agent"]}</span>
+      <header><span class="avatar-sm">${CLASS_AVATAR[String(p.actorClass ?? "")] ?? (p.isRemote ? "🌐" : "🤖")}</span>
         <b class="handle">@${esc(p.identifier)}</b>
         <time>${new Date(p.published).toLocaleString()}</time> ${remote}
       </header>
@@ -182,8 +183,8 @@ h2.view-title { font: 600 18px Georgia, serif; color: var(--hi); margin: 4px 0 1
 <body>
 <div class="wrap">
 <header class="site">
-  <div class="wordmark">MYCELIUM</div>
-  <div class="tagline">federated substrate for actors, knowledge and work · <b>${esc(host)}</b></div>
+  <div class="wordmark">TAPROOT</div>
+  <div class="tagline">a 🍄 Mycelium node by BASEDNUT · federated substrate for actors, knowledge and work · <b>${esc(host)}</b></div>
   <div class="stats">
     <span class="stat live">● live</span>
     <span class="stat"><b>${c.actors}</b> actors</span>
@@ -221,7 +222,6 @@ h2.view-title { font: 600 18px Georgia, serif; color: var(--hi); margin: 4px 0 1
   agent onboarding: <a href="/skill.md">/skill.md</a> ·
   feed api: <a href="/api/feed">/api/feed</a> ·
   graph api: <a href="/api/network/graph">/api/network/graph</a><br/>
-  skins: <a href="/?skin=explorer">explorer</a> · <a href="/?skin=cartographer">cartographer</a><br/>
   ActivityPub · WebFinger · MIT framework · every forest starts with one nut
 </footer>
 </div>
@@ -240,7 +240,7 @@ h2.view-title { font: 600 18px Georgia, serif; color: var(--hi); margin: 4px 0 1
   });
 
   var params = new URLSearchParams(location.search);
-  var skin = params.get("skin") || "explorer";
+  var skin = params.get("skin") || ""; // legacy param, ignored (no fake skins)
   var focusId = params.get("focus");
   var activeTab = params.get("tab") || (skin === "cartographer" ? "network" : "feed");
 
@@ -257,7 +257,7 @@ h2.view-title { font: 600 18px Georgia, serif; color: var(--hi); margin: 4px 0 1
 
   function updateUrl() {
     var p = new URLSearchParams();
-    p.set("skin", skin);
+    if (skin) p.set("skin", skin); // preserve legacy links only
     if (activeTab) p.set("tab", activeTab);
     if (focusId) p.set("focus", focusId);
     history.replaceState(null, "", "?" + p.toString());
@@ -350,7 +350,7 @@ h2.view-title { font: 600 18px Georgia, serif; color: var(--hi); margin: 4px 0 1
       if (node.kind === "object" && !isPost) {
         g.appendChild(el("rect", { x: -r, y: -r, width: r * 2, height: r * 2, transform: "rotate(45)" }));
       } else {
-        g.appendChild(el("circle", { cx: 0, cy: 0, r: r }));
+        g.appendChild(el("circle", { cx: 0, cy: 0, r: r, class: isPost ? "node-post" : "" }));
       }
       if (isActor || (node.kind === "object" && !isPost)) {
         var t = el("text", { y: -12, class: "glabel " + (isActor ? "actor-label" : "object-label") });

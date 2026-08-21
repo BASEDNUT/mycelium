@@ -15,6 +15,8 @@ export interface NetworkDeps {
   adminToken?: string;
 }
 
+import { clientKey } from "./ratelimit.ts";
+
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -22,19 +24,28 @@ function json(status: number, body: unknown): Response {
   });
 }
 
-export function bearerOk(request: Request, deps: NetworkDeps): boolean {
-  // Legacy any-bearer check. With per-actor auth wired, semantic object
-  // writes require admin or a valid actor token; reads stay open.
+/** Real authentication for semantic-graph writes.
+ * Admin token OR any valid per-actor token. An arbitrary string >7 chars
+ * is NOT sufficient (audit CRITICAL fix: auth bypass). */
+export async function bearerOk(
+  request: Request,
+  deps: NetworkDeps,
+): Promise<boolean> {
   const h = request.headers.get("authorization") ?? "";
   if (!h.startsWith("Bearer ")) return false;
   const token = h.slice(7);
   if (deps.adminToken != null && token === deps.adminToken) return true;
-  // actor tokens are async-verified in callers that need identity;
-  // here we only gate write access structurally.
-  return token.length > 7;
+  if (deps.auth == null) return false;
+  const actor = await deps.auth.authenticate(token);
+  return actor != null;
 }
 
 const SEMANTIC_TYPES = new Set(["topic", "concept", "project"]);
+
+/** Read-path rate limit guard (audit MEDIUM: limiter existed but was never wired). */
+function readLimited(request: Request, deps: NetworkDeps): boolean {
+  return deps.rateLimits?.read.allow(clientKey(request)) === false;
+}
 
 export async function handleNetwork(
   request: Request,
@@ -46,6 +57,7 @@ export async function handleNetwork(
 
   // Full graph projection
   if (path === "/api/network/graph" && request.method === "GET") {
+    if (readLimited(request, deps)) return json(429, { error: "rate limit exceeded" });
     const [actors, posts] = await Promise.all([
       store.listActors(),
       store.listPosts(null),
@@ -60,6 +72,7 @@ export async function handleNetwork(
 
   // Semantic objects list
   if (path === "/api/network/objects" && request.method === "GET") {
+    if (readLimited(request, deps)) return json(429, { error: "rate limit exceeded" });
     const type = url.searchParams.get("type");
     const objects = await network.listSemanticObjects(type);
     return json(200, { count: objects.length, objects });
@@ -67,7 +80,7 @@ export async function handleNetwork(
 
   // Create semantic object
   if (path === "/api/network/object" && request.method === "POST") {
-    if (!bearerOk(request, deps)) return json(401, { error: "unauthorized" });
+    if (!(await bearerOk(request, deps))) return json(401, { error: "unauthorized" });
     let body: Record<string, unknown>;
     try {
       body = await request.json();
@@ -115,7 +128,7 @@ export async function handleNetwork(
 
   // Semantic link between objects
   if (path === "/api/network/link" && request.method === "POST") {
-    if (!bearerOk(request, deps)) return json(401, { error: "unauthorized" });
+    if (!(await bearerOk(request, deps))) return json(401, { error: "unauthorized" });
     let body: Record<string, unknown>;
     try {
       body = await request.json();
@@ -155,6 +168,7 @@ export async function handleNetwork(
   // (must run before the node-detail handler so the /neighbors suffix routes here)
   if (path.startsWith("/api/network/node/") && path.endsWith("/neighbors") &&
       request.method === "GET") {
+    if (readLimited(request, deps)) return json(429, { error: "rate limit exceeded" });
     const rawId = decodeURIComponent(
       path.slice("/api/network/node/".length, -"/neighbors".length),
     );
@@ -202,12 +216,16 @@ export async function handleNetwork(
 
   // Node detail by graph id (actor:x | post:uuid | object:uuid)
   if (path.startsWith("/api/network/node/") && request.method === "GET") {
+    if (readLimited(request, deps)) return json(429, { error: "rate limit exceeded" });
     const rawId = decodeURIComponent(path.slice("/api/network/node/".length));
-    const parts = rawId.split(":", 2);
-    if (parts.length !== 2) {
+    // Split on FIRST colon only: remote ids carry colons (actor:name@host,
+    // post:https://...). split(":", 2) truncated them (audit HIGH fix).
+    const ci = rawId.indexOf(":");
+    if (ci < 1) {
       return json(400, { error: "node id must be kind:id (actor:foo, post:uuid, object:uuid)" });
     }
-    const [kind, key] = parts;
+    const kind = rawId.slice(0, ci);
+    const key = rawId.slice(ci + 1);
 
     if (kind === "actor") {
       const actor = await store.getActor(key);
@@ -228,7 +246,12 @@ export async function handleNetwork(
     }
 
     if (kind === "post") {
-      const post = await store.getPost(key);
+      let post = await store.getPost(key);
+      if (post == null && /^https?:\/\//.test(key)) {
+        // remote posts store their URI as the KV key — try suffix match
+        const m = key.match(/\/p\/([^/]+)$/);
+        if (m) post = await store.getPost(m[1]);
+      }
       if (post == null) {
         return json(404, { error: "post not found" });
       }

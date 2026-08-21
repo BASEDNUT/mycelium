@@ -65,6 +65,11 @@ function tooMany(): Response {
   return json(429, { error: "rate limit exceeded" });
 }
 
+/** Read-path rate limit guard (audit MEDIUM: limiter existed but was never wired). */
+function readLimited(request: Request, deps: ApiDeps): boolean {
+  return deps.rateLimits?.read.allow(clientKey(request)) === false;
+}
+
 const MAX_CONTENT = 5000;
 const MAX_TITLE = 200;
 const ACTOR_CLASSES = new Set([
@@ -84,6 +89,7 @@ export async function handleApi(
   }
 
   if (path === "/api/actors" && request.method === "GET") {
+    if (readLimited(request, deps)) return tooMany();
     const actors = await deps.store.listActors();
     return json(200, { count: actors.length, actors });
   }
@@ -253,6 +259,7 @@ export async function handleApi(
   }
 
   if (path === "/api/feed" && request.method === "GET") {
+    if (readLimited(request, deps)) return tooMany();
     const actorParam = url.searchParams.get("actor");
     const identifier = actorParam == null || actorParam === ""
       ? null
@@ -378,8 +385,13 @@ export async function handleApi(
 
   // ── notifications ──
   if (path === "/api/notifications" && request.method === "GET") {
+    if (readLimited(request, deps)) return tooMany();
     const identifier = (url.searchParams.get("actor") ?? "").trim().toLowerCase();
     if (!identifier) return json(400, { error: "actor query param required" });
+    // Notifications are private per-actor data (audit MEDIUM fix: was auth-free).
+    if (!(await requireActor(request, deps, identifier))) {
+      return json(401, { error: "unauthorized for actor: " + identifier });
+    }
     const unreadOnly = url.searchParams.get("unread") === "true";
     const limit = Math.min(
       Math.max(parseInt(url.searchParams.get("limit") ?? "50") || 50, 1),
@@ -439,7 +451,7 @@ export async function handleApi(
     if (/^https?:\/\//.test(target)) {
       targetUri = new URL(target);
       try {
-        assertFederatable(targetUri);
+        await assertFederatable(targetUri);
       } catch (e) {
         return json(400, { error: String(e instanceof Error ? e.message : e) });
       }
@@ -449,7 +461,7 @@ export async function handleApi(
       const name = handle.slice(0, at);
       const host = handle.slice(at + 1);
       try {
-        assertFederatableHost(host);
+        await assertFederatableHost(host);
       } catch (e) {
         return json(400, { error: String(e instanceof Error ? e.message : e) });
       }
@@ -462,7 +474,7 @@ export async function handleApi(
       }
       targetUri = actor.id;
       try {
-        assertFederatable(targetUri);
+        await assertFederatable(targetUri);
       } catch (e) {
         return json(400, { error: String(e instanceof Error ? e.message : e) });
       }
@@ -539,6 +551,7 @@ export async function handleApi(
 
   // ── following list ──
   if (path === "/api/following" && request.method === "GET") {
+    if (readLimited(request, deps)) return tooMany();
     const identifier = (url.searchParams.get("actor") ?? "").trim().toLowerCase();
     if (!identifier) return json(400, { error: "actor query param required" });
     const following = await deps.store.listFollowing(identifier);
@@ -547,6 +560,7 @@ export async function handleApi(
 
   // ── post interactions (likes/boosts per post) ──
   if (path === "/api/post/interactions" && request.method === "GET") {
+    if (readLimited(request, deps)) return tooMany();
     const postId = (url.searchParams.get("postId") ?? "").trim();
     if (!postId) return json(400, { error: "postId query param required" });
     const [likes, boosts] = await Promise.all([

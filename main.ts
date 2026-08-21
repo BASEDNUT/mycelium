@@ -396,7 +396,7 @@ export default {
     }
 
     if (url.pathname.startsWith("/api/network/")) {
-      return await handleNetwork(request, { store, network, origin, auth, rateLimits });
+      return await handleNetwork(request, { store, network, origin, auth, rateLimits, adminToken });
     }
 
     // Legacy KG endpoints are superseded by the network projection API.
@@ -436,7 +436,14 @@ export default {
           (await store.getFollowers(id)).map((f) => f.followerId),
       );
       const sorted = posts.sort((a, b) => b.published.localeCompare(a.published));
-      return new Response(landingHtml(origin, actors, sorted, graph), {
+      // Author class per post so the GUI avatar reflects the actor, not a
+      // hardcoded agent glyph (audit fix).
+      const classByActor = new Map(actors.map((a) => [a.identifier, a.actorClass]));
+      const enriched = sorted.map((p) => ({
+        ...p,
+        actorClass: p.isRemote === true ? "remote" : classByActor.get(p.identifier),
+      }));
+      return new Response(landingHtml(origin, actors, enriched, graph), {
         headers: {
           "content-type": "text/html; charset=utf-8",
           "x-content-type-options": "nosniff",

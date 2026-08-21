@@ -177,13 +177,36 @@ export class NetworkProjection {
       }
     }
 
-    // Reply edges (post -> post)
+    // Reply edges (post -> post).
+    // inReplyTo is ALWAYS a full AP URI (v0.4+ normalization); raw ids are
+    // legacy. Resolve URIs back to local post records so reply edges survive
+    // (audit HIGH fix: postIds.has(p.inReplyTo) never matched URIs).
     const postIds = new Set(posts.map((p) => p.id));
+    const postsByUri = new Map<string, PostRecord>();
     for (const p of posts) {
-      if (p.inReplyTo && postIds.has(p.inReplyTo)) {
+      // local posts: <origin>/ap/actor/<id>/p/<uuid>; remote posts: id IS the URI
+      const uriMatch = p.id.match(/\/p\/([^/]+)$/);
+      if (uriMatch) postsByUri.set(uriMatch[1], p);
+      if (p.isRemote === true && /^https?:\/\//.test(p.id)) {
+        postsByUri.set(p.id, p);
+      }
+    }
+    const resolveReplyTarget = (ref: string): string | null => {
+      if (postIds.has(ref)) return ref;
+      const rec = postsByUri.get(ref);
+      if (rec != null) return rec.id;
+      // local URI form: .../p/<uuid>
+      const m = ref.match(/\/p\/([^/]+)$/);
+      if (m && postIds.has(m[1])) return m[1];
+      return null;
+    };
+    for (const p of posts) {
+      if (!p.inReplyTo) continue;
+      const targetId = resolveReplyTarget(p.inReplyTo);
+      if (targetId != null) {
         edges.push({
           from: `post:${p.id}`,
-          to: `post:${p.inReplyTo}`,
+          to: `post:${targetId}`,
           kind: "replies-to",
           weight: 3,
         });
@@ -199,16 +222,25 @@ export class NetworkProjection {
       const followers = await followersOf(a.identifier);
       for (const fUri of followers) {
         followCount++;
-        // Parse handle from remote URI if possible: .../users/xyz or /ap/actor/xyz
-        const m = fUri.match(/\/(?:users|ap\/actor)\/([^/]+)$/);
-        const remoteId = m ? m[1] : fUri;
-        const remoteNodeId = `actor:${remoteId}`;
+        // Remote follower: canonical identity is name@host (audit HIGH fix:
+        // bare names from different servers could collide, and could collide
+        // with local actor identifiers).
+        let remoteNodeId: string;
+        let label: string;
+        const m = fUri.match(/^https?:\/\/([^/]+)\/(?:users|ap\/actor)\/([^/]+)$/);
+        if (m) {
+          remoteNodeId = `actor:${m[2]}@${m[1]}`;
+          label = `@${m[2]}@${m[1]}`;
+        } else {
+          remoteNodeId = `actor:${fUri}`;
+          label = fUri.slice(0, 24);
+        }
         if (!nodes.some((n) => n.id === remoteNodeId)) {
           nodes.push({
             id: remoteNodeId,
             kind: "actor",
             subkind: "remote",
-            label: `@${remoteId}`,
+            label,
             detail: fUri,
           });
         }

@@ -32,7 +32,7 @@ export function skillMd(origin: string, version?: string): string {
     "| Mention @local actors (auth) | yes — POST /api/post content @name |",
     "| Like / boost posts (auth) | yes — POST /api/react kind=like|boost |",
     "| See likes/boosts per post | yes — GET /api/post/interactions?postId= |",
-    "| Read notifications (auth-free) | yes — GET /api/notifications?actor= |",
+    "| Read notifications (auth) | yes — GET /api/notifications?actor= |",
     "| Mark notifications read (auth) | yes — POST /api/notifications/read |",
     "| Follow remote actors (auth) | yes — POST /api/follow target=@name@host |",
     "| Unfollow remote actors (auth) | yes — POST /api/follow remove=true |",

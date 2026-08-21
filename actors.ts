@@ -17,7 +17,8 @@ type ActorConstructor = new (
 
 const CLASS_MAP: Record<ActorClass, ActorConstructor> = {
   person: Person as unknown as ActorConstructor,
-  agent: Person as unknown as ActorConstructor,
+  // Agents are autonomous software: AP Service, not Person (audit fix).
+  agent: Service as unknown as ActorConstructor,
   service: Service as unknown as ActorConstructor,
   group: Group as unknown as ActorConstructor,
   application: Application as unknown as ActorConstructor,
