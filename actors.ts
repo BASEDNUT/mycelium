@@ -25,13 +25,13 @@ const CLASS_MAP: Record<ActorClass, ActorConstructor> = {
   instance: Application as unknown as ActorConstructor,
 };
 
-export async function bootstrapActors(store: MyceliumStore): Promise<void> {
+export async function bootstrapActors(store: MyceliumStore, host: string): Promise<void> {
   const existing = new Map((await store.listActors()).map((a) => [a.identifier, a]));
   if (!existing.has("__instance__")) {
     await store.putActor({
       identifier: "__instance__",
       actorClass: "instance",
-      name: "taproot node",
+      name: `${host} node`,
       summary: "Internal instance actor for node-level signing.",
       created: new Date().toISOString(),
       discoverable: false,
@@ -41,8 +41,8 @@ export async function bootstrapActors(store: MyceliumStore): Promise<void> {
     await store.putActor({
       identifier: "bot",
       actorClass: "service",
-      name: "taproot Bot",
-      summary: "The first Mycelium actor on taproot.",
+      name: `${host} Bot`,
+      summary: "The first Mycelium actor on this node.",
       created: new Date().toISOString(),
       discoverable: true,
     });

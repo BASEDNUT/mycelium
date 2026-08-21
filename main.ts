@@ -36,15 +36,22 @@ import { landingHtml } from "./landing.ts";
 import { VERSION } from "./version.ts";
 
 const DATA_DIR = Deno.env.get("DATA_DIR") ?? "./data";
+// ORIGIN is required (audit HIGH v0.9.0): the framework must never assume
+// a deployment's identity by default.
+const origin = Deno.env.get("ORIGIN");
+if (origin == null) {
+  throw new Error("ORIGIN env is required (e.g. https://your-node.example)");
+}
+const host = new URL(origin).host;
 const kv = await Deno.openKv(`${DATA_DIR}/mycelium.db`);
 const store = new MyceliumStore(kv);
 const network = new NetworkProjection(kv);
 await migrateKg(kv); // one-time: legacy kg entities -> semantic objects
-await bootstrapActors(store);
+await bootstrapActors(store, host);
 
 // ── Security: key envelope (AES-256-GCM at rest) + per-actor tokens ──
 const envelope = new KeyEnvelope();
-await envelope.loadOrGenerate(`${DATA_DIR}/master.key`);
+await envelope.loadOrGenerate(`${DATA_DIR}/master.key`, () => store.hasEncryptedKeys());
 store.setKeyEnvelope(envelope);
 const migratedKeys = await store.migrateKeysToEncrypted();
 if (migratedKeys > 0) {
@@ -69,8 +76,6 @@ try {
   try { await Deno.chmod(ADMIN_TOKEN_FILE, 0o600); } catch { /* best effort */ }
   console.warn("auth: generated new admin token at " + ADMIN_TOKEN_FILE);
 }
-
-const origin = Deno.env.get("ORIGIN") ?? "https://taproot.basednut.com";
 
 // SSRF-hardened document loader: ALL federation-side dereferences (remote
 // actor/object fetches triggered by inbox handlers) pass the same private-

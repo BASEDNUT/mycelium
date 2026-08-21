@@ -118,6 +118,14 @@ export class MyceliumStore {
     return migrated;
   }
 
+  /** True if any stored actor key is already encrypted (needs master key). */
+  async hasEncryptedKeys(): Promise<boolean> {
+    for await (const e of this.kv.list<unknown>({ prefix: [...NS, "key"] })) {
+      if (isEncrypted(e.value)) return true;
+    }
+    return false;
+  }
+
   // ── followers ──
   async getFollowers(identifier: string): Promise<FollowerRecord[]> {
     const out: FollowerRecord[] = [];

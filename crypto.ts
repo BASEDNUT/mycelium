@@ -15,8 +15,16 @@ export interface EncryptedBlob {
 export class KeyEnvelope {
   private key: CryptoKey | null = null;
 
-  /** Load master key from a 64-char hex string, or generate + persist one. */
-  async loadOrGenerate(path: string): Promise<void> {
+  /**
+   * Load master key from a 64-char hex string, or generate + persist one.
+   * Fail-closed (audit HIGH v0.9.0): if the key is missing/invalid while
+   * encrypted actor keys already exist, silent regeneration would make
+   * every stored key permanently undecryptable — refuse instead.
+   */
+  async loadOrGenerate(
+    path: string,
+    encryptedKeysExist: () => Promise<boolean>,
+  ): Promise<void> {
     let hex: string | null = null;
     try {
       hex = (await Deno.readTextFile(path)).trim();
@@ -24,6 +32,13 @@ export class KeyEnvelope {
       hex = null;
     }
     if (hex == null || !/^[0-9a-f]{64}$/i.test(hex)) {
+      if (await encryptedKeysExist()) {
+        throw new Error(
+          `crypto: master key at ${path} missing/invalid while encrypted actor keys exist — ` +
+            `refusing to regenerate (all actor identities would be lost). Restore the key ` +
+            `file or deliberately reset the datastore.`,
+        );
+      }
       const raw = crypto.getRandomValues(new Uint8Array(32));
       hex = Array.from(raw, (b) => b.toString(16).padStart(2, "0")).join("");
       await Deno.writeTextFile(path, hex + "\n");

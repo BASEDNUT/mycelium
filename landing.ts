@@ -29,6 +29,15 @@ const CLASS_AVATAR: Record<string, string> = {
   instance: "🏛️", agent: "🤖", remote: "🌐",
 };
 
+// JSON-in-<script> hardening: "<" is emitted as the literal six characters
+// \u003c so hostile content (e.g. a federated post body containing
+// "</script>") can never close the embed tag. v0.8.0 shipped "\u003c"
+// inside a TS string, which compiles to "<" — a no-op replace and a
+// stored-XSS vector (audit CRITICAL, fixed v0.9.0).
+export function embedJson(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
+}
+
 export function landingHtml(
   origin: string,
   actors: LandingActor[],
@@ -78,7 +87,7 @@ export function landingHtml(
 
   // Graph data embedded via JSON script tag (safe injection pattern:
   // raw JSON text, read with textContent, never innerHTML).
-  const graphJson = JSON.stringify({
+  const graphJson = embedJson({
     nodes: graph.nodes.map((n) => ({
       id: n.id,
       kind: n.kind,
@@ -93,7 +102,17 @@ export function landingHtml(
       kind: e.kind,
       label: e.label ?? "",
     })),
-  }).replace(/</g, "\u003c");
+  });
+
+  // Full-view layout caps at 12/16/24 — disclose instead of hiding it.
+  const actorTotal = graph.nodes.filter((n) => n.kind === "actor").length;
+  const semanticTotal = graph.nodes.filter(
+    (n) => n.kind === "object" && !n.id.startsWith("post:"),
+  ).length;
+  const postTotal = graph.nodes.filter((n) => n.id.startsWith("post:")).length;
+  const cappedNote = actorTotal > 12 || semanticTotal > 16 || postTotal > 24
+    ? `<p class="cap-note">full view shows the first 12 actors · 16 objects · 24 posts (${graph.counts.totalNodes} nodes in graph) — <a href="/api/network/graph">full graph via API</a></p>`
+    : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -181,6 +200,7 @@ footer { text-align: center; margin-top: 34px; color: var(--muted); font-size: 1
 footer a { color: var(--gold); text-decoration: none; border-bottom: 1px dotted var(--brown); }
 h2.view-title { font: 600 18px Georgia, serif; color: var(--hi); margin: 4px 0 14px; }
 @media (max-width: 640px) { .wordmark { font-size: 32px; } }
+.cap-note{font-size:12px;color:var(--bark);opacity:.85;margin:6px 0 0}
 </style>
 </head>
 <body>
@@ -215,6 +235,7 @@ h2.view-title { font: 600 18px Georgia, serif; color: var(--hi); margin: 4px 0 1
   <h2 class="view-title">Network — click a node to navigate</h2>
   <div class="graphbox">
   <svg viewBox="0 0 900 640" id="netgraph" role="img" aria-label="network graph — click nodes to focus their neighborhood"></svg>
+  ${cappedNote}
   <div class="graphinfo" id="graphinfo">click a node → its 1-hop neighborhood · click a neighbor to travel · gold = actors · green diamonds = semantic objects · bark dots = posts</div>
   </div>
   <div class="detail" id="nodedetail">

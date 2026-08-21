@@ -76,6 +76,18 @@ function visiblePosts(posts: PostRecord[]): PostRecord[] {
   );
 }
 
+// Deletion policy (audit HIGH v0.9.0): creator or admin. Rows without
+// provenance (legacy migrations, createdBy == null) are ADMIN-ONLY —
+// missing provenance must not mean anyone-can-delete.
+export function canDelete(
+  caller: string,
+  createdBy: string | null | undefined,
+): boolean {
+  if (caller === "__admin__") return true;
+  if (createdBy == null) return false;
+  return createdBy === caller;
+}
+
 export async function handleNetwork(
   request: Request,
   deps: NetworkDeps,
@@ -205,9 +217,8 @@ export async function handleNetwork(
     const id = decodeURIComponent(path.slice("/api/network/object/".length));
     const obj = await network.getSemanticObject(id);
     if (obj == null) return json(404, { error: "object not found" });
-    if (caller !== "__admin__" && obj.createdBy != null &&
-        obj.createdBy !== caller) {
-      return json(403, { error: "only creator or admin may delete" });
+    if (!canDelete(caller, obj.createdBy)) {
+      return json(403, { error: "only creator or admin may delete (legacy rows: admin only)" });
     }
     await network.deleteSemanticObject(id);
     return json(200, { ok: true, deleted: id });
@@ -220,9 +231,8 @@ export async function handleNetwork(
     const id = decodeURIComponent(path.slice("/api/network/link/".length));
     const link = await network.getSemanticLink(id);
     if (link == null) return json(404, { error: "link not found" });
-    if (caller !== "__admin__" && link.createdBy != null &&
-        link.createdBy !== caller) {
-      return json(403, { error: "only creator or admin may delete" });
+    if (!canDelete(caller, link.createdBy)) {
+      return json(403, { error: "only creator or admin may delete (legacy rows: admin only)" });
     }
     await network.deleteSemanticLink(id);
     return json(200, { ok: true, deleted: id });
