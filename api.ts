@@ -17,6 +17,20 @@ import { clientKey } from "./ratelimit.ts";
 import { assertFederatable, assertFederatableHost } from "./ssrf.ts";
 import { VERSION } from "./version.ts";
 
+// Deterministic Like/Announce activity ID so a later Undo can reference the
+// exact same activity (audit v0.9.1: random UUIDs made Undo impossible).
+export function likeActivityId(
+  origin: string,
+  identifier: string,
+  kind: "like" | "boost",
+  postId: string,
+): URL {
+  return new URL(
+    `/ap/actor/${encodeURIComponent(identifier)}/${kind}/${encodeURIComponent(postId)}`,
+    origin,
+  );
+}
+
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -320,8 +334,47 @@ export async function handleApi(
     }
 
     if (remove) {
+      if (await deps.store.getLike(kind, postId, identifier) == null) {
+        return json(200, { ok: true, removed: false });
+      }
+      let undone = false;
+      try {
+        const ctx = deps.federation.createContext(
+          new URL(deps.origin),
+          undefined,
+        );
+        const actorUri = ctx.getActorUri(identifier);
+        const objectUri = post.isRemote === true && /^https?:\//.test(post.id)
+          ? new URL(post.id)
+          : new URL(`/ap/actor/${post.identifier}/p/${post.id}`, actorUri);
+        const inner = kind === "like"
+          ? new Like({
+            id: likeActivityId(deps.origin, identifier, kind, postId),
+            actor: actorUri,
+            object: objectUri,
+          })
+          : new Announce({
+            id: likeActivityId(deps.origin, identifier, kind, postId),
+            actor: actorUri,
+            object: objectUri,
+          });
+        const undo = new Undo({ actor: actorUri, object: inner });
+        if (post.isRemote === true && /^https?:\//.test(post.identifier)) {
+          // Remote post: Undo goes to the responsible remote author (W3C).
+          const author = await ctx.lookupObject(post.identifier) as Actor | null;
+          if (author != null) {
+            await ctx.sendActivity({ identifier }, author, undo);
+            undone = true;
+          }
+        } else {
+          await ctx.sendActivity({ identifier }, "followers", undo);
+          undone = true;
+        }
+      } catch (e) {
+        console.error("api: undo delivery failed:", e);
+      }
       await deps.store.removeLike(kind, postId, identifier);
-      return json(200, { ok: true, removed: true });
+      return json(200, { ok: true, removed: true, undone });
     }
 
     // Existing check — idempotent
@@ -353,17 +406,27 @@ export async function handleApi(
         : new URL(`/ap/actor/${post.identifier}/p/${post.id}`, postUri);
       const activity = kind === "like"
         ? new Like({
-          id: new URL(`/ap/actor/${identifier}/${kind}/${crypto.randomUUID()}`, actorUri),
+          id: likeActivityId(deps.origin, identifier, kind, postId),
           actor: actorUri,
           object: objectUri,
         })
         : new Announce({
-          id: new URL(`/ap/actor/${identifier}/${kind}/${crypto.randomUUID()}`, actorUri),
+          id: likeActivityId(deps.origin, identifier, kind, postId),
           actor: actorUri,
           object: objectUri,
         });
-      await ctx.sendActivity({ identifier }, "followers", activity);
-      delivered = true;
+      if (post.isRemote === true && /^https?:\//.test(post.identifier)) {
+        // Remote post: Like/Announce goes to the responsible remote author
+        // (W3C guidance) instead of only our followers (audit v0.9.1).
+        const author = await ctx.lookupObject(post.identifier) as Actor | null;
+        if (author != null) {
+          await ctx.sendActivity({ identifier }, author, activity);
+          delivered = true;
+        }
+      } else {
+        await ctx.sendActivity({ identifier }, "followers", activity);
+        delivered = true;
+      }
     } catch (e) {
       console.error("api: react fan-out failed:", e);
     }

@@ -3,6 +3,7 @@
 //
 // Run: deno serve --allow-net --allow-env --allow-read=data --allow-write=data --unstable-kv main.ts
 // Env: ORIGIN (public origin) · DATA_DIR (default ./data) · MYCELIUM_TOKEN_FILE (default $DATA_DIR/api_token)
+//      NODE_TITLE (landing wordmark) · NODE_CREDIT (landing credit line) — deployment branding
 
 import {
   createFederation,
@@ -147,6 +148,29 @@ federation
   )
   .setCounter(async (_ctx, identifier) =>
     (await store.getFollowers(identifier)).length
+  );
+
+// ── Following (audit v0.9.1: actor docs recommended both collections) ──
+federation
+  .setFollowingDispatcher(
+    "/ap/actor/{identifier}/following",
+    async (_ctx, identifier, cursor) => {
+      if (await store.getActor(identifier) == null) return null;
+      const all = await store.listFollowing(identifier);
+      const size = 50;
+      const offset = cursor == null ? 0 : parseInt(cursor);
+      const slice = all.slice(offset, offset + size);
+      const nextCursor = offset + size < all.length
+        ? String(offset + size)
+        : null;
+      return {
+        items: slice.map((f) => new URL(f.targetId)),
+        nextCursor,
+      } as PageItems<URL>;
+    },
+  )
+  .setCounter(async (_ctx, identifier) =>
+    (await store.listFollowing(identifier)).length
   );
 
 // ── Outbox ──
@@ -347,6 +371,13 @@ federation
     const m = objectId.match(/\/ap\/actor\/([^/]+)\/p\/([^/]+)$/);
     if (m == null) return;
     const [, identifier, postId] = m;
+    // Audit v0.9.1: verify the referenced post exists and belongs to this
+    // local actor before recording a remote interaction (W3C guidance).
+    const target = await store.getPost(postId);
+    if (target == null || target.isRemote === true ||
+      target.identifier !== identifier) {
+      return;
+    }
     await store.putLike({
       id: like.id?.href ?? crypto.randomUUID(),
       actorId: actorUri,
@@ -371,6 +402,12 @@ federation
     const m = objectId.match(/\/ap\/actor\/([^/]+)\/p\/([^/]+)$/);
     if (m == null) return;
     const [, identifier, postId] = m;
+    // Audit v0.9.1: same existence + ownership check as Like.
+    const target = await store.getPost(postId);
+    if (target == null || target.isRemote === true ||
+      target.identifier !== identifier) {
+      return;
+    }
     await store.putLike({
       id: announce.id?.href ?? crypto.randomUUID(),
       actorId: actorUri,
@@ -485,7 +522,17 @@ export default {
       // Per-response CSP nonce: inline script is nonce-gated; injected
       // script without the nonce cannot execute (audit: no CSP).
       const cspNonce = crypto.randomUUID().replace(/-/g, "");
-      return new Response(landingHtml(origin, actors, enriched, graph, cspNonce), {
+      return new Response(
+        landingHtml(
+          origin,
+          actors,
+          enriched,
+          graph,
+          cspNonce,
+          Deno.env.get("NODE_TITLE"),
+          Deno.env.get("NODE_CREDIT"),
+        ),
+        {
         headers: {
           "content-type": "text/html; charset=utf-8",
           "x-content-type-options": "nosniff",

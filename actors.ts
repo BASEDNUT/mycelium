@@ -76,6 +76,10 @@ export interface ActorDocContext {
   getActorUri: (id: string) => URL;
   getInboxUri: (id?: string) => URL;
   getOutboxUri: (id: string) => URL;
+  // Optional so framework users without collection dispatchers still build
+  // valid actor docs (audit v0.9.1: missing followers/following).
+  getFollowersUri?: (id: string) => URL;
+  getFollowingUri?: (id: string) => URL;
 }
 
 export function buildActorDoc(
@@ -92,6 +96,8 @@ export function buildActorDoc(
     summary: record.summary,
     inbox: ctx.getInboxUri(record.identifier),
     outbox: ctx.getOutboxUri(record.identifier),
+    followers: ctx.getFollowersUri?.(record.identifier),
+    following: ctx.getFollowingUri?.(record.identifier),
     endpoints: new Endpoints({ sharedInbox: ctx.getInboxUri() }),
     publicKey: keyPairs[0]?.cryptographicKey,
     assertionMethods: keyPairs.map((p) => p.multikey),

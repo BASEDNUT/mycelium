@@ -44,7 +44,12 @@ export function landingHtml(
   posts: LandingPost[],
   graph: NetworkGraph,
   cspNonce?: string,
+  nodeTitle?: string,
+  nodeCredit?: string,
 ): string {
+  // Deployment branding (audit v0.9.1: framework must not hardcode node
+  // identity). Fall back to host-derived neutral default.
+  const title = nodeTitle ?? new URL(origin).host;
   // CSP nonce gates the inline script; without it the header would block it.
   const nonceAttr = cspNonce != null ? ` nonce="${cspNonce}"` : "";
   const host = new URL(origin).host;
@@ -206,8 +211,8 @@ h2.view-title { font: 600 18px Georgia, serif; color: var(--hi); margin: 4px 0 1
 <body>
 <div class="wrap">
 <header class="site">
-  <div class="wordmark">TAPROOT</div>
-  <div class="tagline">a 🍄 Mycelium node by BASEDNUT · federated substrate for actors, knowledge and work · <b>${esc(host)}</b></div>
+  <div class="wordmark">${esc(title)}</div>
+  <div class="tagline">a 🍄 Mycelium node${nodeCredit != null ? " by " + esc(nodeCredit) : ""} · federated substrate for actors, knowledge and work · <b>${esc(host)}</b></div>
   <div class="stats">
     <span class="stat live">● live</span>
     <span class="stat"><b>${c.actors}</b> actors</span>
