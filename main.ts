@@ -535,6 +535,7 @@ export default {
         {
         headers: {
           "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store, must-revalidate",
           "x-content-type-options": "nosniff",
           "x-frame-options": "DENY",
           "referrer-policy": "no-referrer",

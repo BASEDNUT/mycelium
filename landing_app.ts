@@ -775,6 +775,7 @@ export const LANDING_APP_JS = `
     if (!main) return;
     clear(main);
     var h = S.view;
+    try {
     if (h.indexOf('#/topic/') === 0 && h.length > 8) viewTopic(main, decodeURIComponent(h.slice(8)));
     else if (h.indexOf('#/actor/') === 0 && h.length > 8) viewActor(main, decodeURIComponent(h.slice(8)));
     else if (h.indexOf('#/tag/') === 0 && h.length > 6) viewTag(main, decodeURIComponent(h.slice(6)));
@@ -785,6 +786,13 @@ export const LANDING_APP_JS = `
     else if (h === '#/settings') viewSettings(main);
     else if (h === '#/signin') viewSignin(main);
     else viewExplore(main);
+    } catch (e) {
+      var card = el('div', 'card');
+      card.appendChild(el('h3', null, 'View error'));
+      card.appendChild(el('p', null, String(e && e.message ? e.message : e)));
+      card.appendChild(el('p', 'dim', 'Hard-refresh (Ctrl+Shift+R) once. If it persists, report this text.'));
+      main.appendChild(card);
+    }
     // refresh rail/tab active states
     var rail = document.querySelector('.navrail');
     if (rail) {
@@ -803,6 +811,13 @@ export const LANDING_APP_JS = `
     S.view = location.hash || '#/explore';
     render(); window.scrollTo(0, 0);
   });
+  window.onerror = function (msg) {
+    try {
+      var d = document.getElementById('errbar');
+      if (d) { d.textContent = 'JS error: ' + msg; d.style.display = 'block'; }
+    } catch (e2) {}
+    return false;
+  };
 
   // ── boot ──
   S.token = localStorage.getItem('myc_token');

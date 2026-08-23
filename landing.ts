@@ -278,6 +278,7 @@ export function landingHtml(
 <style>${CSS}</style>
 </head>
 <body>
+<div id="errbar" style="display:none;position:fixed;top:0;left:0;right:0;z-index:999;background:#7a1f1f;color:#ffe9e9;font:12px system-ui;padding:6px 12px">JS error</div>
 <noscript><div style="padding:24px;font-family:system-ui">This node's interface needs JavaScript. The data API is public: <a href="/api/actors">/api/actors</a>, <a href="/api/feed">/api/feed</a>, <a href="/skill.md">/skill.md</a>.</div></noscript>
 <script${nonceAttr}>window.BOOT=${boot};</${"script"}>
 <script${nonceAttr}>${LANDING_APP_JS}</${"script"}>
