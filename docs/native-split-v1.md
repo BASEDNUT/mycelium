@@ -26,8 +26,8 @@ Already-proven pattern: `NODE_ICON` env (framework default 🍄, taproot sets �
 | User algorithm DSL (JSON/YAML/MD) | **mycelium** | engine generic; algos are user data |
 | Metadata records w/ origin labels | **mycelium** | generic schema |
 | Moderation TOOLING | **mycelium** | report/mute/block mechanics |
-| Moderation POLICY + /s/meta guidelines content | **taproot** | instance governance |
-| Seeded subroots (/s/basednut + category org) | **taproot** | content/deployment, not code |
+| Moderation POLICY + /r/meta guidelines content | **taproot** | instance governance |
+| Seeded subroots (/r/basednut + category org) | **taproot** | content/deployment, not code |
 | Branding, palette, 🌱, titles | **taproot** | env/config layer (NODE_ICON pattern) |
 | P2P media / torrent / decentralized storage | **mycelium** (future) | transport capability, node-neutral |
 

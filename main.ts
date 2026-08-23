@@ -442,6 +442,13 @@ async function refreshCounts(): Promise<void> {
 refreshCounts();
 setInterval(() => refreshCounts(), 60_000);
 
+// v0.12.0: board retention sweeper — hourly rolling deletion (docs/subroots-identity-v1.md)
+setInterval(() => {
+  store.sweepExpiredPosts().then((n) => {
+    if (n > 0) console.log(`[sweeper] deleted ${n} expired board posts`);
+  }).catch((e) => console.error("[sweeper] error:", e));
+}, 3_600_000);
+
 federation.setNodeInfoDispatcher("/nodeinfo/2.1", () => ({
   software: { name: "mycelium", version: VERSION },
   protocols: ["activitypub"],

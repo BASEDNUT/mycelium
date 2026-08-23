@@ -62,6 +62,13 @@ export interface PostRecord {
   subroot?: string; // optional subroot binding (v0.11.0); legacy posts have none
 }
 
+export interface VoteRecord {
+  postId: string;
+  actorId: string;
+  value: 1 | -1; // up / down
+  voted: string;
+}
+
 export interface FollowerRecord {
   id: string;
   followerId: string;
@@ -211,6 +218,68 @@ export class MyceliumStore {
 
   async deleteSubroot(slug: string): Promise<void> {
     await this.kv.delete([...NS, "subroot", slug]);
+  }
+
+  // ── votes (v0.12.0, docs/subroots-identity-v1.md) ──
+  async putVote(rec: VoteRecord): Promise<void> {
+    await this.kv.set([...NS, "vote", rec.postId, rec.actorId], rec);
+  }
+
+  async getVote(postId: string, actorId: string): Promise<VoteRecord | null> {
+    return (await this.kv.get<VoteRecord>([...NS, "vote", postId, actorId]))
+      .value;
+  }
+
+  async listVotes(postId: string): Promise<VoteRecord[]> {
+    const out: VoteRecord[] = [];
+    for await (
+      const e of this.kv.list<VoteRecord>({ prefix: [...NS, "vote", postId] })
+    ) out.push(e.value);
+    return out;
+  }
+
+  async deleteVote(postId: string, actorId: string): Promise<void> {
+    await this.kv.delete([...NS, "vote", postId, actorId]);
+  }
+
+  /** Delete a post and its attached votes (retention sweeper helper). */
+  async deletePostCascade(id: string): Promise<number> {
+    let n = 0;
+    for await (
+      const e of this.kv.list<VoteRecord>({ prefix: [...NS, "vote", id] })
+    ) {
+      await this.kv.delete(e.key);
+      n++;
+    }
+    await this.deletePost(id);
+    return n;
+  }
+
+  /**
+   * Board retention sweeper: delete posts in subroots whose archetype is
+   * "board" and whose age exceeds the subroot retention window.
+   * Returns number of posts deleted.
+   */
+  async sweepExpiredPosts(now = new Date()): Promise<number> {
+    const boards = new Map<string, number>();
+    for (const s of await this.listSubroots()) {
+      if (s.archetype === "board" && s.config.retentionDays != null) {
+        boards.set(s.slug, s.config.retentionDays);
+      }
+    }
+    if (boards.size === 0) return 0;
+    let deleted = 0;
+    for (const p of await this.listPosts(null)) {
+      if (p.subroot == null) continue;
+      const days = boards.get(p.subroot);
+      if (days == null) continue;
+      const ageMs = now.getTime() - new Date(p.published).getTime();
+      if (ageMs > days * 86_400_000) {
+        await this.deletePostCascade(p.id);
+        deleted++;
+      }
+    }
+    return deleted;
   }
 
   // ── likes / boosts ──

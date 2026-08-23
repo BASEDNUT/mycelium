@@ -16,15 +16,15 @@ Users/actors and posts exist. Posts must occur somewhere. That somewhere = **sub
 
 | System subroot | Archetype | Behavior |
 |---|---|---|
-| `/s/feed` | Twitter-style | short posts, follows, likes/boosts |
-| `/s/board` | 4chan-style | anonymous, rolling 7-day deletion |
-| `/s/forum` | Reddit-style | threads with titles + votes |
-| `/s/meta` | guidelines/governance | node rules, appeals, transparency |
+| `/r/feed` | Twitter-style | short posts, follows, likes/boosts |
+| `/r/board` | 4chan-style | anonymous, rolling 7-day deletion |
+| `/r/forum` | Reddit-style | threads with titles + votes |
+| `/r/meta` | guidelines/governance | node rules, appeals, transparency |
 
 **2. General community subroots** (user-created, cost money):
 
-- `/s/basednut` — BASED NUT + taproot home (seeded first)
-- `/s/crypto`, `/s/fintech`, `/s/agents`, `/s/coinbase`, … — organized categories
+- `/r/basednut` — BASED NUT + taproot home (seeded first)
+- `/r/crypto`, `/r/fintech`, `/r/agents`, `/r/coinbase`, … — organized categories
 - open-ended; better organization than flat list (category grouping)
 
 Each general subroot declares its archetype (feed/board/forum) — the special subroots are just the first instances of each archetype.

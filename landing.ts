@@ -151,6 +151,19 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .tagchip{color:var(--gold);font-weight:600}
 .menchip{color:var(--bark);font-weight:600}
 .actions{display:flex;gap:6px;margin-top:6px;color:var(--muted);font-size:13px}
+.votebox{display:flex;flex-direction:column;align-items:center;margin-right:4px}
+.varrow{background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;line-height:1;padding:1px 4px}
+.varrow:hover{color:var(--gold,#d8a24a)}
+.varrow.did{color:var(--gold,#d8a24a);font-weight:700}
+.vscore{font-size:12px;font-weight:600;color:var(--text,#eee)}
+.rpill{display:inline-block;font-size:11px;padding:1px 8px;border-radius:10px;background:rgba(216,162,74,.14);color:var(--gold,#d8a24a);cursor:pointer;text-decoration:none}
+.rpill:hover{background:rgba(216,162,74,.28)}
+.rrow{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1px solid var(--line,#2a2a2a);border-radius:10px;margin-bottom:8px;text-decoration:none;color:inherit}
+.rrow:hover{border-color:var(--gold,#d8a24a)}
+.rname{font-weight:700}
+.rdesc{color:var(--muted);font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.arpill{font-size:11px;padding:1px 8px;border-radius:10px;background:var(--panel2,#1e1e1e);color:var(--muted)}
+.cselect{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line,#2a2a2a);background:var(--panel2,#1e1e1e);color:var(--text,#eee);margin-bottom:8px;font:inherit}
 .act{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:99px;color:var(--muted);font-size:13px}
 .act:hover{background:color-mix(in srgb,var(--gold) 12%,transparent);color:var(--gold)}
 .act.did{color:var(--gold);font-weight:700}

@@ -755,17 +755,80 @@ export async function handleApi(
     if (readLimited(request, deps)) return tooMany();
     const postId = (url.searchParams.get("postId") ?? "").trim();
     if (!postId) return json(400, { error: "postId query param required" });
-    const [likes, boosts] = await Promise.all([
+    const [likes, boosts, votes, me] = await Promise.all([
       deps.store.listLikes(postId),
       deps.store.listBoosts(postId),
+      deps.store.listVotes(postId),
+      (async () => {
+        const a = url.searchParams.get("actor");
+        return a ? await deps.store.getVote(postId, a.trim().toLowerCase()) : null;
+      })(),
     ]);
+    const up = votes.filter((v) => v.value === 1).length;
+    const down = votes.filter((v) => v.value === -1).length;
     return json(200, {
       postId,
       likes: likes.map((l) => l.actorId),
       boosts: boosts.map((b) => b.actorId),
       likeCount: likes.length,
       boostCount: boosts.length,
+      upvotes: up,
+      downvotes: down,
+      score: up - down,
+      myVote: me == null ? 0 : me.value,
     });
+  }
+
+  // ── votes (v0.12.0) ──
+  if (path === "/api/vote" && request.method === "POST") {
+    if (!deps.rateLimits.write.allow(clientKey(request))) return tooMany();
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch {
+      return json(400, { error: "invalid json" });
+    }
+    const identifier = String(body.identifier ?? "").trim().toLowerCase();
+    const postId = String(body.postId ?? "").trim();
+    const value = body.value === 1 ? 1 : body.value === -1 ? -1 : 0;
+    const remove = body.remove === true;
+    if (!identifier || !postId) {
+      return json(400, { error: "identifier and postId required" });
+    }
+    if (value === 0 && !remove) {
+      return json(400, { error: "value must be 1 or -1" });
+    }
+    if (!(await requireActor(request, deps, identifier))) {
+      return json(401, { error: "unauthorized for actor: " + identifier });
+    }
+    const post = await deps.store.getPost(postId);
+    if (post == null) return json(404, { error: "unknown post" });
+    if (post.subroot != null) {
+      const sr = await deps.store.getSubroot(post.subroot);
+      if (sr != null && !sr.config.votes) {
+        return json(403, { error: "votes disabled in this subroot" });
+      }
+    }
+    const existing = await deps.store.getVote(postId, identifier);
+    if (remove) {
+      if (existing == null) return json(200, { removed: false });
+      await deps.store.deleteVote(postId, identifier);
+      return json(200, { removed: true });
+    }
+    if (existing != null && existing.value === value) {
+      await deps.store.deleteVote(postId, identifier);
+      return json(200, { removed: true });
+    }
+    if (value !== 1 && value !== -1) {
+      return json(400, { error: "value must be 1 or -1" });
+    }
+    await deps.store.putVote({
+      postId,
+      actorId: identifier,
+      value,
+      voted: new Date().toISOString(),
+    });
+    return json(201, { voted: value });
   }
 
   // ── token management (admin only) ──

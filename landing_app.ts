@@ -19,7 +19,7 @@ export const LANDING_APP_JS = `
     view: location.hash || '#/explore',
     query: '', classFilter: 'all',
     interactions: {}, notif: { unread: 0, items: [] }, renderSeq: 0,
-    following: [], tags: null, degree: {}, replies: {}
+    following: [], tags: null, degree: {}, replies: {}, subroots: []
   };
 
   // ── helpers ──
@@ -164,7 +164,7 @@ export const LANDING_APP_JS = `
   function fetchInteractions(ids) {
     var missing = ids.filter(function (id) { return !S.interactions[id]; });
     return Promise.all(missing.slice(0, 24).map(function (id) {
-      return api('/api/post/interactions?postId=' + encodeURIComponent(id)).then(function (j) {
+      return api('/api/post/interactions?postId=' + encodeURIComponent(id) + (S.me && S.me.actor ? '&actor=' + encodeURIComponent(S.me.actor) : '')).then(function (j) {
         if (j._status === 200) S.interactions[id] = j;
       }).catch(function () {});
     })).then(function () { return missing.length; });
@@ -199,6 +199,31 @@ export const LANDING_APP_JS = `
   }
 
   // ── composer ──
+  function loadSubroots() {
+    return api('/api/subroots').then(function (j) {
+      if (j._status === 200 && j.subroots) S.subroots = j.subroots;
+    }).catch(function () {});
+  }
+  function subrootOf(slug) {
+    for (var i = 0; i < S.subroots.length; i++) { if (S.subroots[i].slug === slug) return S.subroots[i]; }
+    return null;
+  }
+  function votesOn(p) {
+    if (!p.subroot) return true;
+    var sr = subrootOf(p.subroot);
+    return !sr || sr.config.votes !== false;
+  }
+  function toggleVote(v, id) {
+    if (!S.me || !S.me.actor) { location.hash = '#/signin'; return; }
+    api('/api/vote', 'POST', { identifier: S.me.actor, postId: id, value: v })
+      .then(function (j) {
+        if (j._status === 200 || j._status === 201) {
+          delete S.interactions[id];
+          render();
+          fetchInteractions([id]).then(render);
+        } else toast(j.error || 'vote failed');
+      }).catch(function () { toast('network error'); });
+  }
   var composerOpen = false;
   function openComposer(long) {
     if (!S.me || !S.me.actor) { location.hash = '#/signin'; return; }
@@ -214,6 +239,15 @@ export const LANDING_APP_JS = `
       var ti = el('input', 'cinput'); ti.placeholder = 'Topic title'; ti.maxLength = 200; ti.id = 'ctitle';
       box.appendChild(ti);
     }
+    var sel = el('select', 'cselect'); sel.id = 'csub';
+    var opt0 = el('option', null, 'post to — root (no subroot)'); opt0.value = '';
+    sel.appendChild(opt0);
+    S.subroots.forEach(function (sr) {
+      var o = el('option', null, '/r/' + sr.slug + ' · ' + sr.title); o.value = sr.slug;
+      sel.appendChild(o);
+    });
+    if (S.view.indexOf('#/r/') === 0) sel.value = S.view.slice(4);
+    box.appendChild(sel);
     var ta = el('textarea', 'ctext'); ta.placeholder = long ? 'Topic body…' : 'What is taking root?';
     ta.maxLength = 5000; ta.id = 'cbody'; box.appendChild(ta);
     var f = el('div', 'cfoot');
@@ -224,6 +258,8 @@ export const LANDING_APP_JS = `
       var content = ta.value.trim();
       if (!content) { toast('empty post'); return; }
       var body = { identifier: S.me.actor, content: content, form: long ? 'long' : 'short' };
+      var sub = document.getElementById('csub');
+      if (sub && sub.value) body.subroot = sub.value;
       if (long) { var t = ti.value.trim(); if (t) body.title = t; }
       api('/api/post', 'POST', body).then(function (j) {
         if (j._status === 201) {
@@ -340,6 +376,16 @@ export const LANDING_APP_JS = `
     var bar = el('div', 'actions');
     var i = S.interactions[p.id];
     var replies = S.replies[p.id] || 0;
+    if (votesOn(p)) {
+      var vb = el('div', 'votebox');
+      var up = el('button', 'varrow' + (i && i.myVote === 1 ? ' did' : ''), '▲'); up.title = 'Upvote';
+      var sc = el('span', 'vscore', String(i ? (i.score != null ? i.score : 0) : 0));
+      var dn = el('button', 'varrow' + (i && i.myVote === -1 ? ' did' : ''), '▼'); dn.title = 'Downvote';
+      up.onclick = function (e) { e.stopPropagation(); toggleVote(1, p.id); };
+      dn.onclick = function (e) { e.stopPropagation(); toggleVote(-1, p.id); };
+      vb.appendChild(up); vb.appendChild(sc); vb.appendChild(dn);
+      bar.appendChild(vb);
+    }
     var rB = el('button', 'act', null); rB.title = 'Replies';
     rB.appendChild(el('span', null, '\u{1F4AC}'));
     rB.appendChild(el('span', 'acount', String(replies)));
@@ -380,6 +426,12 @@ export const LANDING_APP_JS = `
     line2.appendChild(el('span', 'pclass', (CLS_LABEL[a.actorClass] || a.actorClass)));
     line2.appendChild(el('span', 'pdot', '\u00B7'));
     line2.appendChild(el('span', 'ptime', fmtTime(p.published)));
+    if (p.subroot) {
+      var rp = el('a', 'rpill', '/r/' + p.subroot);
+      rp.href = '#/r/' + encodeURIComponent(p.subroot);
+      rp.onclick = function (e) { e.stopPropagation(); };
+      line2.appendChild(rp);
+    }
     if (p.isRemote) { line2.appendChild(el('span', 'pdot', '\u00B7')); line2.appendChild(el('span', 'premote', 'federated')); }
     who.appendChild(line2);
     head.appendChild(who);
@@ -579,6 +631,46 @@ export const LANDING_APP_JS = `
       if (fetchedB === 0 || S.renderSeq !== seqB) return;
       render();
     });
+  }
+
+function viewRoots(mount) {
+    mount.appendChild(viewHeader('Roots', {}));
+    var order = ['feed', 'board', 'forum', 'meta'];
+    var list = S.subroots.slice().sort(function (a, b) {
+      var ai = order.indexOf(a.archetype), bi = order.indexOf(b.archetype);
+      if (ai !== bi) return ai - bi;
+      return a.slug.localeCompare(b.slug);
+    });
+    if (list.length === 0) { mount.appendChild(el('div', 'empty', 'no roots yet')); return; }
+    list.forEach(function (sr) {
+      var cnt = 0; S.posts.forEach(function (p) { if (p.subroot === sr.slug) cnt++; });
+      var r = el('a', 'rrow'); r.href = '#/r/' + encodeURIComponent(sr.slug);
+      r.appendChild(el('span', 'rname', '/r/' + sr.slug));
+      r.appendChild(el('span', 'arpill', sr.archetype));
+      r.appendChild(el('span', 'rdesc', sr.description || sr.title || ''));
+      r.appendChild(el('span', 'dcount', cnt + ' posts'));
+      mount.appendChild(r);
+    });
+  }
+  function viewSubroot(mount, slug) {
+    var sr = subrootOf(slug);
+    if (!sr) {
+      var nf = el('div', 'card');
+      nf.appendChild(el('h3', null, 'Unknown root'));
+      nf.appendChild(el('p', null, '/r/' + slug + ' does not exist on this node.'));
+      mount.appendChild(nf);
+      return;
+    }
+    var newBtn = el('button', 'goldbtn sm', '+ Post');
+    newBtn.onclick = function () { openComposer(sr.archetype === 'forum'); };
+    mount.appendChild(viewHeader('/r/' + slug, { action: newBtn }));
+    var meta = el('div', 'ameta');
+    meta.appendChild(el('span', 'arpill', sr.archetype));
+    meta.appendChild(el('span', 'am', sr.title));
+    if (sr.description) meta.appendChild(el('span', 'am', sr.description));
+    mount.appendChild(meta);
+    var list = S.posts.filter(function (p) { return p.subroot === slug; });
+    postList(mount, list, sr.archetype === 'forum' ? 'table' : 'cards');
   }
 
   function viewTags(mount) {
@@ -813,7 +905,7 @@ export const LANDING_APP_JS = `
     var nbadge = (S.notif.unread > 0) ? String(S.notif.unread) : null;
     rail.appendChild(navItem('#/explore', '\u{1F9ED}', 'Explore'));
     rail.appendChild(navItem('#/feed', '\u{1F33E}', 'Feed'));
-    rail.appendChild(navItem('#/forum', '\u{1F4DC}', 'Forum'));
+    rail.appendChild(navItem('#/roots', '\u{1F33F}', 'Roots'));
     rail.appendChild(navItem('#/tags', '#', 'Tags'));
     rail.appendChild(navItem('#/notifications', '\u{1F514}', 'Notifications', nbadge));
     rail.appendChild(navItem('#/settings', '\u2699\uFE0F', 'Settings'));
@@ -823,7 +915,7 @@ export const LANDING_APP_JS = `
     body.appendChild(main);
     app.appendChild(body);
     var tabs = el('nav', 'tabbar'); tabs.setAttribute('aria-label', 'Mobile');
-    [['#/explore','\u{1F9ED}'],['#/feed','\u{1F33E}'],['#/forum','\u{1F4DC}'],['#/tags','#'],['#/docs','\u{1F4D6}'],['#/settings','\u2699\uFE0F']].forEach(function (t) {
+    [['#/explore','\u{1F9ED}'],['#/feed','\u{1F33E}'],['#/roots','\u{1F33F}'],['#/tags','#'],['#/docs','\u{1F4D6}'],['#/settings','\u2699\uFE0F']].forEach(function (t) {
       var a = el('a', 'tab' + (S.view === t[0] ? ' on' : ''), t[1]); a.href = t[0];
       tabs.appendChild(a);
     });
@@ -846,6 +938,8 @@ export const LANDING_APP_JS = `
     else if (h.indexOf('#/actor/') === 0 && h.length > 8) viewActor(main, decodeURIComponent(h.slice(8)));
     else if (h.indexOf('#/tag/') === 0 && h.length > 6) viewTag(main, decodeURIComponent(h.slice(6)));
     else if (h === '#/feed') viewFeed(main);
+    else if (h.indexOf('#/r/') === 0 && h.length > 4) viewSubroot(main, decodeURIComponent(h.slice(4)));
+    else if (h === '#/roots') viewRoots(main);
     else if (h === '#/forum') viewForum(main);
     else if (h === '#/tags') viewTags(main);
     else if (h === '#/notifications') viewNotifications(main);
@@ -892,6 +986,8 @@ export const LANDING_APP_JS = `
   buildShell();
   whoami().then(function () {
     return loadFollowing();
+  }).then(function () {
+    return loadSubroots();
   }).then(function () {
     return loadNotifications();
   }).then(function () {
