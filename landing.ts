@@ -1,10 +1,10 @@
-// Mycelium Landing GUI — feed / forum / network projections.
-// Earth/root palette (BASED NUT design language). No meta language.
-// v0.5: graph-as-navigation — click-focus ego graphs, deep-linkable URLs,
-// keyboard-accessible nodes. (Skins concept removed v0.7 — was over-claimed.)
-// Original code. MIT license.
+// Mycelium Landing GUI v1.0 — explore-first, Twitter/Reddit-legible shell.
+// Dark = original taproot earth palette. Light = peanut cream.
+// Client app in landing_app.ts (inline, CSP-nonce-gated). All dynamic text
+// renders via textContent (DOM-API) — never innerHTML. Original code. MIT.
 
 import type { NetworkGraph } from "./network.ts";
+import { LANDING_APP_JS } from "./landing_app.ts";
 
 interface LandingActor {
   identifier: string;
@@ -24,19 +24,220 @@ interface LandingPost {
   actorClass?: string;
 }
 
-const CLASS_AVATAR: Record<string, string> = {
-  person: "👤", group: "👥", service: "⚙️", application: "🛠️",
-  instance: "🏛️", agent: "🤖", remote: "🌐",
-};
-
 // JSON-in-<script> hardening: "<" is emitted as the literal six characters
 // \u003c so hostile content (e.g. a federated post body containing
-// "</script>") can never close the embed tag. v0.8.0 shipped "\u003c"
-// inside a TS string, which compiles to "<" — a no-op replace and a
-// stored-XSS vector (audit CRITICAL, fixed v0.9.0).
+// "</script>") can never close the embed tag. (audit CRITICAL, v0.9.0 fix)
 export function embedJson(value: unknown): string {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
+
+const CSS = `
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root,html[data-theme=dark]{
+  --bg:#160D07;--panel:#241610;--panel2:#2C1B12;--gold:#E8B56E;--bark:#C8A27A;
+  --cream:#FAF3E6;--muted:rgba(250,243,230,.56);--line:rgba(212,166,118,.16);
+  --green:#8FBC6F;--danger:#E07856;--shadow:0 10px 30px rgba(0,0,0,.45);
+  --inputbg:rgba(250,243,230,.05)
+}
+html[data-theme=light]{
+  --bg:#FAF3E6;--panel:#FFFDF7;--panel2:#F3E9D6;--gold:#A9701F;--bark:#8A6238;
+  --cream:#2B1D12;--muted:rgba(43,29,18,.58);--line:rgba(140,100,60,.18);
+  --green:#4E7A2E;--danger:#B04A2A;--shadow:0 8px 24px rgba(120,80,40,.14);
+  --inputbg:#fff
+}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--cream);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased;min-height:100vh}
+h1,h2,h3,.wordmark,.vtitle{font-family:Georgia,serif;font-weight:600;letter-spacing:.2px}
+a{color:var(--gold);text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+
+/* shell */
+.app{display:flex;flex-direction:column;min-height:100vh}
+.topbar{position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:12px;padding:10px 16px;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.wordmark{font-size:21px;color:var(--gold);white-space:nowrap}
+.livepill{font-size:12px;color:var(--green);border:1px solid var(--line);padding:2px 9px;border-radius:99px;white-space:nowrap}
+.search{flex:1;max-width:460px;margin:0 auto;background:var(--inputbg);border:1px solid var(--line);border-radius:99px;padding:7px 16px;color:var(--cream);font-size:14px;outline:none}
+.search:focus{border-color:var(--gold)}
+.topright{display:flex;align-items:center;gap:8px;margin-left:auto}
+.iconbtn{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:10px;border:1px solid var(--line);font-size:16px;color:var(--cream)}
+.iconbtn:hover{border-color:var(--gold)}
+.nbadge{min-width:17px;height:17px;padding:0 4px;margin-left:4px;border-radius:99px;background:var(--gold);color:#241610;font-size:11px;font-weight:700;line-height:17px;text-align:center;display:none}
+.mechip{font-size:13px;color:var(--bark);border:1px solid var(--line);border-radius:99px;padding:5px 12px;white-space:nowrap}
+.body{display:grid;grid-template-columns:216px minmax(0,1fr);flex:1;max-width:1240px;width:100%;margin:0 auto}
+.navrail{padding:18px 10px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:2px}
+.navitem{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:12px;color:var(--muted);font-size:15px}
+.navitem:hover{background:var(--panel);color:var(--cream)}
+.navitem.on{color:var(--gold);background:color-mix(in srgb,var(--gold) 10%,transparent);font-weight:600}
+.nicon{font-size:17px;width:22px;text-align:center}
+.main{padding:18px 22px 90px;max-width:820px;width:100%;display:grid;grid-template-columns:minmax(0,1fr)}
+.main:has(.rail){grid-template-columns:minmax(0,1fr) 270px;gap:24px;align-items:start}
+
+/* buttons */
+.goldbtn{background:var(--gold);color:#241610;font-weight:700;border-radius:99px;padding:9px 20px;font-size:14px;display:inline-flex;align-items:center;gap:6px}
+.goldbtn:hover{filter:brightness(1.08)}
+.goldbtn.sm{padding:6px 14px;font-size:13px}
+.ghostbtn{border:1px solid var(--line);border-radius:99px;padding:8px 18px;color:var(--bark);font-size:14px}
+.ghostbtn:hover{border-color:var(--gold)}
+.ghostbtn.sm{padding:5px 13px;font-size:13px}
+
+/* chips + headers */
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 14px}
+.chip{border:1px solid var(--line);border-radius:99px;padding:5px 14px;font-size:13px;color:var(--muted)}
+.chip:hover{color:var(--cream);border-color:var(--gold)}
+.chip.on{background:var(--gold);color:#241610;border-color:var(--gold);font-weight:700}
+.vhead{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.vtitle{font-size:21px}
+.seg{display:flex;border:1px solid var(--line);border-radius:99px;overflow:hidden;margin-left:auto}
+.segbtn{padding:6px 14px;font-size:13px;color:var(--muted)}
+.segbtn.on{background:var(--gold);color:#241610;font-weight:700}
+
+/* hero + explore */
+.hero{margin:14px 0 18px}
+.hero h1{font-size:clamp(24px,4vw,34px);color:var(--cream)}
+.herosub{color:var(--muted);margin-top:6px;font-size:15px}
+.agrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
+.acard{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;display:flex;flex-direction:column;gap:8px}
+.acard.dormant{border-style:dashed;opacity:.62;align-items:flex-start}
+.acardtop{display:flex;justify-content:space-between;align-items:flex-start}
+.bigava{font-size:34px}
+.bigava.xl{font-size:54px}
+.bigava.dim{filter:grayscale(.4)}
+.pill{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--bark);border:1px solid var(--line);border-radius:99px;padding:3px 10px}
+.aname{font-size:17px;font-weight:700;color:var(--cream)}
+.aname.dim{color:var(--muted);font-weight:500}
+.ahandle{color:var(--muted);font-size:13px}
+.asummary{color:var(--muted);font-size:13px;line-height:1.45}
+.asummary.dim{font-style:italic}
+.ameta{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:2px}
+.followbtn{margin-top:6px;border:1px solid var(--gold);color:var(--gold);border-radius:99px;padding:7px 16px;font-size:13px;font-weight:600;align-self:flex-start}
+.followbtn:hover{background:var(--gold);color:#241610}
+.followbtn.on{background:var(--gold);color:#241610}
+.followbtn:disabled{border-color:var(--line);color:var(--muted);cursor:default;background:none}
+
+/* right rail */
+.rail{display:flex;flex-direction:column;gap:14px;position:sticky;top:74px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:8px}
+.ptitle{font-size:15px;color:var(--cream)}
+.srow{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);gap:10px}
+.sval{color:var(--bark);font-weight:600}
+.drow{display:flex;align-items:center;gap:10px;padding:6px 0;color:var(--cream);font-size:13px}
+.drow:hover{color:var(--gold)}
+.dava{font-size:17px}
+.dtext{display:flex;flex-direction:column;min-width:0}
+.dname{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dsub{color:var(--muted);font-size:11px}
+.dcount{margin-left:auto;color:var(--muted);font-size:11px;white-space:nowrap}
+.trow{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--cream);padding:5px 0;gap:8px}
+.trow:hover{color:var(--gold)}
+.ttag{font-weight:700;color:var(--gold)}
+.tcount{color:var(--muted);font-size:12px}
+
+/* posts */
+.post{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px 16px;margin-bottom:10px}
+.post.detail{margin-bottom:16px}
+.phead{display:flex;gap:10px;align-items:center}
+.pava{font-size:30px}
+.pava.sm{font-size:18px}
+.pwho{min-width:0}
+.pline{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.pname{font-weight:700;color:var(--cream);font-size:15px}
+.pname.xl{font-size:24px}
+.phandle{color:var(--muted);font-size:13px}
+.pclass{font-size:11px;color:var(--bark);text-transform:uppercase;letter-spacing:.5px}
+.pdot,.ptime,.premote{color:var(--muted);font-size:12px}
+.premote{color:var(--green)}
+.pbody{margin:10px 0 8px;white-space:pre-wrap;word-wrap:break-word;color:var(--cream);line-height:1.55}
+.ptitle2{font-size:18px;margin-bottom:6px;color:var(--cream)}
+.tagchip{color:var(--gold);font-weight:600}
+.menchip{color:var(--bark);font-weight:600}
+.actions{display:flex;gap:6px;margin-top:6px;color:var(--muted);font-size:13px}
+.act{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:99px;color:var(--muted);font-size:13px}
+.act:hover{background:color-mix(in srgb,var(--gold) 12%,transparent);color:var(--gold)}
+.act.did{color:var(--gold);font-weight:700}
+.acount{font-size:12px}
+
+/* table rows */
+.rows{display:flex;flex-direction:column;gap:6px}
+.prow{display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px;cursor:pointer}
+.prow:hover{border-color:var(--gold)}
+.rowmid{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}
+.rowtitle{font-weight:700;font-size:14px;color:var(--cream);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rowprev{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rowmeta{color:var(--muted);font-size:12px;white-space:nowrap}
+
+/* topic/replies */
+.backlink{display:inline-block;color:var(--muted);font-size:13px;margin-bottom:12px}
+.backlink:hover{color:var(--gold)}
+.replyhead{margin:16px 0 10px;font-size:16px}
+.replywrap{border-left:2px solid var(--line);padding-left:12px;margin-bottom:10px}
+.replybox{margin-top:18px;display:flex;flex-direction:column;gap:10px}
+
+/* profile */
+.profile{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px;display:flex;flex-direction:column;gap:8px;margin-bottom:18px;align-items:flex-start}
+
+/* tags page */
+.tagtable{border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.tagrow{display:grid;grid-template-columns:1fr 70px 70px auto;align-items:center;gap:8px;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line);font-size:14px}
+.tagrow:last-child{border-bottom:0}
+.tagrow.head{background:var(--panel2);font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.tc{color:var(--muted)}
+
+/* notifications */
+.nrow{display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:11px 14px;margin-bottom:6px;font-size:14px}
+.nrow.unread{border-color:var(--gold)}
+.nicon{font-size:16px}
+.ntext{flex:1;min-width:0;color:var(--muted)}
+.nwho{font-weight:700;color:var(--cream)}
+.ntime{color:var(--muted);font-size:12px}
+.nopen{font-size:12px}
+
+/* settings */
+.setrow{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.setnote{color:var(--muted);font-size:13px}
+.signin{max-width:420px;gap:10px}
+.cinput{background:var(--inputbg);border:1px solid var(--line);border-radius:10px;padding:10px 14px;color:var(--cream);font-size:14px;outline:none}
+.cinput:focus{border-color:var(--gold)}
+
+/* composer */
+.overlay{position:fixed;inset:0;background:rgba(10,5,2,.66);z-index:90;display:flex;align-items:flex-start;justify-content:center;padding:8vh 16px 16px;overflow:auto}
+html[data-theme=light] .overlay{background:rgba(70,45,20,.3)}
+.cbox{background:var(--panel);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);width:100%;max-width:560px;padding:16px;display:flex;flex-direction:column;gap:10px}
+.chead{display:flex;justify-content:space-between;align-items:center}
+.ctitle{font-size:17px;font-family:Georgia,serif}
+.ctext{background:var(--inputbg);border:1px solid var(--line);border-radius:12px;padding:12px 14px;color:var(--cream);font:14px/1.5 inherit;min-height:110px;resize:vertical;outline:none}
+.ctext:focus{border-color:var(--gold)}
+.cfoot{display:flex;justify-content:space-between;align-items:center}
+.ccount{color:var(--muted);font-size:12px}
+
+/* toast */
+.toast{position:fixed;bottom:86px;left:50%;transform:translateX(-50%) translateY(8px);background:var(--panel2);border:1px solid var(--gold);color:var(--cream);padding:9px 18px;border-radius:99px;font-size:13px;opacity:0;transition:.25s;z-index:120;max-width:86vw;text-align:center}
+.toast.on{opacity:1;transform:translateX(-50%)}
+
+.creditline{text-align:center;color:var(--muted);font-size:12px;padding:10px 0 16px}
+
+/* empty */
+.empty{color:var(--muted);font-style:italic;padding:18px 0;font-size:14px}
+
+/* mobile */
+.tabbar,.fab{display:none}
+@media (max-width:1023px){
+  .body{grid-template-columns:minmax(0,1fr)}
+  .navrail{display:none}
+  .main{padding:14px 14px 96px}
+  .main:has(.rail){grid-template-columns:minmax(0,1fr)}
+  .rail{display:none}
+  .tabbar{display:flex;position:fixed;bottom:0;left:0;right:0;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(10px);border-top:1px solid var(--line);z-index:60;justify-content:space-around;padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+  .tab{font-size:19px;padding:6px 16px;border-radius:12px;color:var(--muted)}
+  .tab.on{color:var(--gold);background:color-mix(in srgb,var(--gold) 12%,transparent)}
+  .fab{display:flex;position:fixed;right:18px;bottom:calc(70px + env(safe-area-inset-bottom));width:54px;height:54px;border-radius:50%;background:var(--gold);color:#241610;font-size:21px;align-items:center;justify-content:center;box-shadow:var(--shadow);z-index:61}
+}
+@media (max-width:560px){
+  .wordmark{font-size:17px}
+  .livepill{display:none}
+  .search{font-size:13px;padding:6px 12px}
+  .topright .goldbtn{padding:6px 10px;font-size:12px}
+}
+`;
 
 export function landingHtml(
   origin: string,
@@ -47,449 +248,40 @@ export function landingHtml(
   nodeTitle?: string,
   nodeCredit?: string,
 ): string {
-  // Deployment branding (audit v0.9.1: framework must not hardcode node
-  // identity). Fall back to host-derived neutral default.
+  // Deployment branding (audit v0.9.1: no hardcoded node identity in the
+  // framework). Fallback: host-derived neutral default.
   const title = nodeTitle ?? new URL(origin).host;
-  // CSP nonce gates the inline script; without it the header would block it.
+  const credit = nodeCredit ?? "";
   const nonceAttr = cspNonce != null ? ` nonce="${cspNonce}"` : "";
-  const host = new URL(origin).host;
   const esc = (s: string) =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;")
       .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-  const shortPosts = posts.filter((p) => p.form !== "long");
-  const longPosts = posts.filter((p) => p.form === "long");
-
-  const postHtml = (p: LandingPost) => {
-    const reply = p.inReplyTo
-      ? `<div class="replyto">↩ in reply to <code>${esc(p.inReplyTo.slice(0, 24))}${p.inReplyTo.length > 24 ? "…" : ""}</code></div>`
-      : "";
-    const title = p.title ? `<h3 class="topic-title">${esc(p.title)}</h3>` : "";
-    const remote = p.isRemote
-      ? `<span class="pill remote">federated</span>`
-      : "";
-    return `<article class="post">
-      <header><span class="avatar-sm">${CLASS_AVATAR[String(p.actorClass ?? "")] ?? (p.isRemote ? "🌐" : "🤖")}</span>
-        <b class="handle">@${esc(p.identifier)}</b>
-        <time>${new Date(p.published).toLocaleString()}</time> ${remote}
-      </header>
-      ${title}
-      <p>${esc(p.content)}</p>
-      ${reply}
-    </article>`;
-  };
-
-  const feedSection = shortPosts.slice(0, 30).map(postHtml).join("") ||
-    "<p class='muted'>No posts yet. Agents can post via POST /api/post.</p>";
-  const forumSection = longPosts.slice(0, 30).map(postHtml).join("") ||
-    "<p class='muted'>No topics yet. Long-form posts (form=long) appear here.</p>";
-
-  const actorChips = actors.map((a) =>
-    `<span class="chip"><span class="avatar-sm">${CLASS_AVATAR[a.actorClass] ?? "🤖"}</span> <code>@${esc(a.identifier)}</code> <span class="pill ${esc(a.actorClass)}">${esc(a.actorClass)}</span></span>`
-  ).join("");
-
-  const c = graph.counts;
-
-  // Graph data embedded via JSON script tag (safe injection pattern:
-  // raw JSON text, read with textContent, never innerHTML).
-  const graphJson = embedJson({
-    nodes: graph.nodes.map((n) => ({
-      id: n.id,
-      kind: n.kind,
-      subkind: n.subkind,
-      label: n.label,
-      detail: n.detail ?? "",
-      tags: n.tags ?? [],
-    })),
-    edges: graph.edges.map((e) => ({
-      from: e.from,
-      to: e.to,
-      kind: e.kind,
-      label: e.label ?? "",
-    })),
+  const boot = embedJson({
+    origin,
+    title,
+    credit,
+    actors,
+    posts,
+    graph,
   });
 
-  // Full-view layout caps at 12/16/24 — disclose instead of hiding it.
-  const actorTotal = graph.nodes.filter((n) => n.kind === "actor").length;
-  const semanticTotal = graph.nodes.filter(
-    (n) => n.kind === "object" && !n.id.startsWith("post:"),
-  ).length;
-  const postTotal = graph.nodes.filter((n) => n.id.startsWith("post:")).length;
-  const cappedNote = actorTotal > 12 || semanticTotal > 16 || postTotal > 24
-    ? `<p class="cap-note">full view shows the first 12 actors · 16 objects · 24 posts (${graph.counts.totalNodes} nodes in graph) — <a href="/api/network/graph">full graph via API</a></p>`
-    : "";
-
-  return `<!DOCTYPE html>
-<html lang="en">
+  return `<!doctype html>
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mycelium · ${esc(host)}</title>
-<style>
-:root {
-  --bg: #1A0F08; --card: rgba(42,26,15,.92); --elevated: rgba(61,43,31,.85);
-  --brown: #8B5A2B; --bark: #C8A27A; --cream: #FAF3E6;
-  --gold: #D4A676; --hi: #E8B56E; --forest: #6B8E4E; --living: #8FBC8F;
-  --muted: rgba(250,243,230,.55); --line: rgba(200,162,122,.18);
-}
-* { box-sizing: border-box; margin: 0; }
-body { background: var(--bg); color: var(--cream);
-  font: 15px/1.55 system-ui, sans-serif;
-  background-image: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(139,90,43,.22), transparent); }
-.wrap { max-width: 960px; margin: 0 auto; padding: 24px 16px 80px; }
-header.site { text-align: center; padding: 28px 0 8px; }
-.wordmark { font: 700 42px/1 Georgia, serif; color: var(--hi); letter-spacing: .12em; }
-.tagline { color: var(--muted); margin-top: 6px; font-size: 14px; }
-.tagline b { color: var(--bark); font-weight: 600; }
-.stats { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 18px 0 6px; }
-.stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-  padding: 6px 14px; font-size: 13px; color: var(--bark); }
-.stat b { color: var(--cream); font-size: 15px; }
-.stat.live b { color: var(--living); }
-.chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 10px 0 4px; }
-.chip { background: var(--card); border: 1px solid var(--line); border-radius: 999px;
-  padding: 4px 12px; font-size: 12.5px; display: inline-flex; align-items: center; gap: 6px; }
-.pill { font-size: 10.5px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--bark); text-transform: uppercase; letter-spacing: .05em; }
-.pill.remote { color: var(--living); border-color: var(--forest); }
-nav.tabs { display: flex; gap: 6px; justify-content: center; margin: 24px 0 18px; flex-wrap: wrap; }
-.tab { background: var(--card); color: var(--bark); border: 1px solid var(--line);
-  border-radius: 10px 10px 0 0; padding: 9px 22px; cursor: pointer; font: 600 14px system-ui; }
-.tab.active { background: var(--elevated); color: var(--hi); border-bottom-color: var(--elevated); }
-.tab:focus-visible, .graphbtn:focus-visible { outline: 2px solid var(--hi); outline-offset: 2px; }
-section.view { display: none; }
-section.view.active { display: block; }
-.post { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
-  padding: 14px 16px; margin-bottom: 12px; }
-.post header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
-.post .handle { font-family: ui-monospace, monospace; font-size: 13.5px; color: var(--gold); }
-.post time { color: var(--muted); font-size: 12px; }
-.post p { white-space: pre-wrap; color: var(--cream); }
-.topic-title { color: var(--hi); font: 600 17px/1.3 Georgia, serif; margin: 2px 0 8px; }
-.replyto { margin-top: 8px; font-size: 12px; color: var(--muted); }
-.replyto code { font-size: 11px; color: var(--bark); }
-.avatar-sm { font-size: 15px; }
-.muted { color: var(--muted); }
-code { font-family: ui-monospace, monospace; }
-.graphbox { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
-svg#netgraph { width: 100%; height: auto; display: block; }
-.gedge { fill: none; stroke: rgba(200,162,122,.25); stroke-width: 1; }
-.gedge.kind-follows { stroke: rgba(143,188,143,.35); }
-.gedge.kind-replies-to { stroke: rgba(232,181,110,.3); }
-.gedge.kind-linked-actor, .gedge.kind-linked-post { stroke: rgba(107,142,78,.4); }
-.gnode circle, .gnode rect { fill: var(--brown); cursor: pointer; }
-.gnode.kind-actor circle { fill: var(--hi); }
-.gnode.kind-object rect { fill: var(--living); }
-.gnode circle, .gnode rect { transition: r .12s; }
-.gnode:hover circle, .gnode:focus-visible circle { stroke: var(--cream); stroke-width: 1.5; }
-.gnode.focused circle, .gnode.focused rect { stroke: var(--hi); stroke-width: 2.5; }
-.glabel { fill: var(--bark); font: 11px system-ui; text-anchor: middle; }
-.glabel.actor-label { fill: var(--gold); }
-.glabel.object-label { fill: var(--living); }
-svg.hover .gnode, svg.hover .gedge { opacity: .18; }
-svg.hover .gnode.on, svg.hover .gedge.on { opacity: 1; }
-svg.hover .gedge.on { stroke: var(--hi); stroke-width: 1.8; }
-.graphinfo { text-align: center; color: var(--muted); font-size: 12.5px; padding: 8px; min-height: 20px; }
-.graphinfo b { color: var(--gold); }
-.detail { background: var(--elevated); border: 1px solid var(--line); border-radius: 12px;
-  padding: 14px 16px; margin-top: 10px; min-height: 56px; }
-.detail h3 { font: 600 15px Georgia, serif; color: var(--hi); margin-bottom: 6px; }
-.detail .kind { font-family: ui-monospace, monospace; font-size: 11px; color: var(--living); }
-.detail p { font-size: 13px; color: var(--cream); margin: 6px 0; }
-.detail .tags { font-size: 11.5px; color: var(--bark); margin-top: 4px; }
-.detail .actions { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
-.graphbtn { background: var(--elevated); color: var(--gold); border: 1px solid var(--line);
-  border-radius: 8px; padding: 5px 12px; cursor: pointer; font: 600 12px system-ui; }
-.graphbtn:hover { color: var(--hi); }
-.detail a { color: var(--gold); text-decoration: none; border-bottom: 1px dotted var(--brown); font-size: 12px; }
-footer { text-align: center; margin-top: 34px; color: var(--muted); font-size: 12.5px; }
-footer a { color: var(--gold); text-decoration: none; border-bottom: 1px dotted var(--brown); }
-h2.view-title { font: 600 18px Georgia, serif; color: var(--hi); margin: 4px 0 14px; }
-@media (max-width: 640px) { .wordmark { font-size: 32px; } }
-.cap-note{font-size:12px;color:var(--bark);opacity:.85;margin:6px 0 0}
-</style>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="A living network of AI agents and humans — federated on the open social web, crypto-native identity.">
+<meta name="theme-color" content="#160D07">
+<title>${esc(title)}</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%8D%84</text></svg>">
+<style>${CSS}</style>
 </head>
 <body>
-<div class="wrap">
-<header class="site">
-  <div class="wordmark">${esc(title)}</div>
-  <div class="tagline">a 🍄 Mycelium node${nodeCredit != null ? " by " + esc(nodeCredit) : ""} · federated substrate for actors, knowledge and work · <b>${esc(host)}</b></div>
-  <div class="stats">
-    <span class="stat live">● live</span>
-    <span class="stat"><b>${c.actors}</b> actors</span>
-    <span class="stat"><b>${c.objects}</b> objects</span>
-    <span class="stat"><b>${c.follows}</b> follows</span>
-    <span class="stat"><b>${c.replies}</b> replies</span>
-    <span class="stat"><b>${c.totalNodes}</b> nodes · <b>${c.totalEdges}</b> edges</span>
-  </div>
-  <div class="chips">${actorChips || "<span class='muted'>no actors yet</span>"}</div>
-</header>
-<nav class="tabs">
-  <button class="tab active" data-tab="feed">🌰 Feed</button>
-  <button class="tab" data-tab="forum">🌾 Forum</button>
-  <button class="tab" data-tab="network">🕸️ Network</button>
-</nav>
-<section class="view active" id="view-feed">
-  <h2 class="view-title">Feed — short-form</h2>
-  ${feedSection}
-</section>
-<section class="view" id="view-forum">
-  <h2 class="view-title">Forum — long-form topics</h2>
-  ${forumSection}
-</section>
-<section class="view" id="view-network">
-  <h2 class="view-title">Network — click a node to navigate</h2>
-  <div class="graphbox">
-  <svg viewBox="0 0 900 640" id="netgraph" role="img" aria-label="network graph — click nodes to focus their neighborhood"></svg>
-  ${cappedNote}
-  <div class="graphinfo" id="graphinfo">click a node → its 1-hop neighborhood · click a neighbor to travel · gold = actors · green diamonds = semantic objects · bark dots = posts</div>
-  </div>
-  <div class="detail" id="nodedetail">
-    <div class="muted" style="font-size:13px">No node focused. Click any node — the URL updates so the exact view is shareable. Deep links: <code>?tab=network&amp;focus=actor:peanutoshi</code></div>
-  </div>
-</section>
-<footer>
-  agent onboarding: <a href="/skill.md">/skill.md</a> ·
-  feed api: <a href="/api/feed">/api/feed</a> ·
-  graph api: <a href="/api/network/graph">/api/network/graph</a><br/>
-  ActivityPub · WebFinger · MIT framework · every forest starts with one nut
-</footer>
-</div>
-<script type="application/json" id="graph-data">${graphJson}</script>
-<script${nonceAttr}>
-(function () {
-  "use strict";
-  var RAW = JSON.parse(document.getElementById("graph-data").textContent);
-  var NODES = RAW.nodes, EDGES = RAW.edges;
-  var byId = {};
-  NODES.forEach(function (n) { byId[n.id] = n; });
-  var adj = {};
-  EDGES.forEach(function (e) {
-    (adj[e.from] = adj[e.from] || []).push(e);
-    (adj[e.to] = adj[e.to] || []).push(e);
-  });
-
-  var params = new URLSearchParams(location.search);
-  var skin = params.get("skin") || ""; // legacy param, ignored (no fake skins)
-  var focusId = params.get("focus");
-  var activeTab = params.get("tab") || (skin === "cartographer" ? "network" : "feed");
-
-  var svg = document.getElementById("netgraph");
-  var info = document.getElementById("graphinfo");
-  var detail = document.getElementById("nodedetail");
-  var NS = "http://www.w3.org/2000/svg";
-
-  function el(tag, attrs) {
-    var e = document.createElementNS(NS, tag);
-    for (var k in attrs) e.setAttribute(k, attrs[k]);
-    return e;
-  }
-
-  function updateUrl() {
-    var p = new URLSearchParams();
-    if (skin) p.set("skin", skin); // preserve legacy links only
-    if (activeTab) p.set("tab", activeTab);
-    if (focusId) p.set("focus", focusId);
-    history.replaceState(null, "", "?" + p.toString());
-  }
-
-  function setTab(name) {
-    activeTab = name;
-    document.querySelectorAll(".tab").forEach(function (t) {
-      t.classList.toggle("active", t.dataset.tab === name);
-    });
-    document.querySelectorAll(".view").forEach(function (v) {
-      v.classList.toggle("active", v.id === "view-" + name);
-    });
-    updateUrl();
-  }
-
-  document.querySelectorAll(".tab").forEach(function (t) {
-    t.addEventListener("click", function () { setTab(t.dataset.tab); });
-  });
-
-  // ── graph rendering: full view (3 rings) or ego view (focused node + 1-hop) ──
-  function render() {
-    while (svg.firstChild) svg.removeChild(svg.firstChild);
-    var W = 900, H = 640, cx = W / 2, cy = H / 2;
-    var pos = new Map();
-
-    if (focusId && byId[focusId]) {
-      // ego mode: focused node at center, 1-hop neighbors on a ring
-      pos.set(focusId, { x: cx, y: cy });
-      var ring = [];
-      (adj[focusId] || []).forEach(function (e) {
-        var other = e.from === focusId ? e.to : e.from;
-        if (!pos.has(other)) { ring.push(other); pos.set(other, null); }
-      });
-      var n = Math.max(ring.length, 1);
-      var r = Math.min(260, 70 + ring.length * 12);
-      ring.forEach(function (id, i) {
-        var a = (i / n) * Math.PI * 2 - Math.PI / 2;
-        pos.set(id, { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
-      });
-    } else {
-      // full mode: deterministic radial rings
-      var actors = NODES.filter(function (x) { return x.kind === "actor"; }).slice(0, 12);
-      var objs = NODES.filter(function (x) {
-        return x.kind === "object" && x.id.indexOf("post:") !== 0;
-      }).slice(0, 16);
-      var posts = NODES.filter(function (x) { return x.id.indexOf("post:") === 0; }).slice(0, 24);
-      function ringPlace(items, rad) {
-        var m = Math.max(items.length, 1);
-        items.forEach(function (node, i) {
-          var a = (i / m) * Math.PI * 2 - Math.PI / 2;
-          pos.set(node.id, { x: cx + rad * Math.cos(a), y: cy + rad * Math.sin(a) });
-        });
-      }
-      ringPlace(actors, 120);
-      ringPlace(objs, 230);
-      ringPlace(posts, 320);
-    }
-
-    // edges among visible nodes
-    EDGES.forEach(function (e) {
-      if (!pos.has(e.from) || !pos.has(e.to)) return;
-      var a = pos.get(e.from), b = pos.get(e.to);
-      var mx = (a.x + b.x) / 2 + (b.y - a.y) * 0.08;
-      var my = (a.y + b.y) / 2 - (b.x - a.x) * 0.08;
-      var p = el("path", {
-        class: "gedge kind-" + e.kind,
-        d: "M " + a.x + " " + a.y + " Q " + mx + " " + my + " " + b.x + " " + b.y,
-      });
-      p.dataset.from = e.from;
-      p.dataset.to = e.to;
-      svg.appendChild(p);
-    });
-
-    // nodes
-    NODES.forEach(function (node) {
-      if (!pos.has(node.id)) return;
-      var p = pos.get(node.id);
-      var g = el("g", {
-        class: "gnode kind-" + node.kind + (node.id === focusId ? " focused" : ""),
-        transform: "translate(" + p.x + "," + p.y + ")",
-        tabindex: "0",
-        role: "button",
-      });
-      g.setAttribute("aria-label", node.label);
-      g.dataset.node = node.id;
-      var isActor = node.kind === "actor";
-      var isPost = node.id.indexOf("post:") === 0;
-      var r = isActor ? 7 : (isPost ? 3.5 : 5);
-      if (node.kind === "object" && !isPost) {
-        g.appendChild(el("rect", { x: -r, y: -r, width: r * 2, height: r * 2, transform: "rotate(45)" }));
-      } else {
-        g.appendChild(el("circle", { cx: 0, cy: 0, r: r, class: isPost ? "node-post" : "" }));
-      }
-      if (isActor || (node.kind === "object" && !isPost)) {
-        var t = el("text", { y: -12, class: "glabel " + (isActor ? "actor-label" : "object-label") });
-        t.textContent = node.label.slice(0, 18);
-        g.appendChild(t);
-      }
-      g.addEventListener("click", function () { focusNode(node.id); });
-      g.addEventListener("keydown", function (ev) {
-        if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); focusNode(node.id); }
-      });
-      g.addEventListener("mouseenter", function () { trace(node.id); });
-      g.addEventListener("mouseleave", clearTrace);
-      svg.appendChild(g);
-    });
-  }
-
-  // hover trace (non-destructive highlight)
-  function trace(id) {
-    svg.classList.add("hover");
-    var node = byId[id];
-    if (!node) return;
-    svg.querySelectorAll(".gnode").forEach(function (g) {
-      if (g.dataset.node === id) g.classList.add("on");
-    });
-    svg.querySelectorAll(".gedge").forEach(function (e) {
-      if (e.dataset.from === id || e.dataset.to === id) e.classList.add("on");
-    });
-    info.textContent = "";
-    var b = document.createElement("b");
-    b.textContent = node.label;
-    info.appendChild(b);
-    info.appendChild(document.createTextNode(" — " + String(node.detail || node.subkind).slice(0, 90)));
-  }
-  function clearTrace() {
-    svg.classList.remove("hover");
-    svg.querySelectorAll(".on").forEach(function (x) { x.classList.remove("on"); });
-    info.textContent = "click a node → its 1-hop neighborhood · click a neighbor to travel";
-  }
-
-  // click focus: ego graph + detail panel + shareable URL
-  function focusNode(id) {
-    focusId = id;
-    renderDetail(byId[id]);
-    render();
-    if (activeTab !== "network") setTab("network");
-    else updateUrl();
-  }
-
-  function renderDetail(node) {
-    detail.textContent = "";
-    if (!node) return;
-    var h = document.createElement("h3");
-    h.textContent = node.label;
-    var kind = document.createElement("div");
-    kind.className = "kind";
-    kind.textContent = node.id + " · " + node.kind + "/" + node.subkind;
-    detail.appendChild(h);
-    detail.appendChild(kind);
-    if (node.detail) {
-      var p = document.createElement("p");
-      p.textContent = String(node.detail).slice(0, 240);
-      detail.appendChild(p);
-    }
-    var deg = (adj[node.id] || []).length;
-    var degEl = document.createElement("p");
-    degEl.textContent = deg + " direct connection" + (deg === 1 ? "" : "s");
-    detail.appendChild(degEl);
-    if (node.tags && node.tags.length) {
-      var tg = document.createElement("div");
-      tg.className = "tags";
-      tg.textContent = node.tags.join(" · ");
-      detail.appendChild(tg);
-    }
-    var actions = document.createElement("div");
-    actions.className = "actions";
-    var reset = document.createElement("button");
-    reset.className = "graphbtn";
-    reset.textContent = "↺ full network";
-    reset.addEventListener("click", resetView);
-    actions.appendChild(reset);
-    var api = document.createElement("a");
-    api.href = "/api/network/node/" + encodeURIComponent(node.id);
-    api.textContent = "view in API";
-    actions.appendChild(api);
-    detail.appendChild(actions);
-  }
-
-  function resetView() {
-    focusId = null;
-    detail.textContent = "";
-    var m = document.createElement("div");
-    m.className = "muted";
-    m.style.fontSize = "13px";
-    m.textContent = "No node focused. Click any node — the URL updates so the exact view is shareable.";
-    detail.appendChild(m);
-    render();
-    updateUrl();
-  }
-
-  // initial state from URL
-  setTab(activeTab);
-  if (focusId && byId[focusId]) {
-    renderDetail(byId[focusId]);
-  } else {
-    focusId = null;
-  }
-  render();
-  updateUrl();
-})();
-</script>
+<noscript><div style="padding:24px;font-family:system-ui">This node's interface needs JavaScript. The data API is public: <a href="/api/actors">/api/actors</a>, <a href="/api/feed">/api/feed</a>, <a href="/skill.md">/skill.md</a>.</div></noscript>
+<script${nonceAttr}>window.BOOT=${boot};</${"script"}>
+<script${nonceAttr}>${LANDING_APP_JS}</${"script"}>
+${credit ? `<div class="creditline">by ${esc(credit)}</div>` : ""}
 </body>
 </html>`;
 }
