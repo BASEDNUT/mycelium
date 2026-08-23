@@ -18,7 +18,7 @@ export const LANDING_APP_JS = `
     layout: localStorage.getItem('myc_layout') || 'cards',
     view: location.hash || '#/explore',
     query: '', classFilter: 'all',
-    interactions: {}, notif: { unread: 0, items: [] },
+    interactions: {}, notif: { unread: 0, items: [] }, renderSeq: 0,
     following: [], tags: null, degree: {}, replies: {}
   };
 
@@ -167,7 +167,7 @@ export const LANDING_APP_JS = `
       return api('/api/post/interactions?postId=' + encodeURIComponent(id)).then(function (j) {
         if (j._status === 200) S.interactions[id] = j;
       }).catch(function () {});
-    }));
+    })).then(function () { return missing.length; });
   }
   function myReact(kind, id) {
     var i = S.interactions[id];
@@ -419,10 +419,16 @@ export const LANDING_APP_JS = `
     } else {
       list.forEach(function (p) { mount.appendChild(postCard(p)); });
     }
-    fetchInteractions(list.map(function (p) { return p.id; })).then(function () {
-      if (S.view.indexOf('/topic/') === 0 || true) render.deferred = true;
+    // Only re-render if NEW interaction data arrived; otherwise the cached
+    // fetch resolves instantly and would loop render->fetch->render forever
+    // (freeze on rapid tab switching). Stale-guard: skip if view changed.
+    var seqAtRender = S.renderSeq;
+    fetchInteractions(list.map(function (p) { return p.id; })).then(function (fetched) {
+      if (fetched === 0) return; // cached: re-rendering would loop forever
       var here = document.getElementById('main');
-      if (here && here.dataset.live === '1') render();
+      if (!here || here.dataset.live !== '1') return;
+      if (S.renderSeq !== seqAtRender) return; // stale: user switched tabs
+      render();
     });
   }
 
@@ -771,6 +777,7 @@ export const LANDING_APP_JS = `
 
   // ── router ──
   function render() {
+    S.renderSeq++;
     var main = document.getElementById('main');
     if (!main) return;
     clear(main);
