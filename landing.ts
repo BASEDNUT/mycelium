@@ -217,6 +217,7 @@ html[data-theme=light] .overlay{background:rgba(70,45,20,.3)}
 
 /* empty */
 .empty{color:var(--muted);font-style:italic;padding:18px 0;font-size:14px}
+.main>.goldbtn,.main>.ghostbtn{width:max-content;justify-self:start}
 
 /* mobile */
 .tabbar,.fab{display:none}

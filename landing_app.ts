@@ -538,7 +538,11 @@ export const LANDING_APP_JS = `
       var si = el('a', 'goldbtn', 'Sign in'); si.href = '#/signin'; box.appendChild(si);
     }
     mount.appendChild(box);
-    fetchInteractions([id]).then(function () { render(); });
+    var seqA = S.renderSeq;
+    fetchInteractions([id]).then(function (fetchedA) {
+      if (fetchedA === 0 || S.renderSeq !== seqA) return;
+      render();
+    });
   }
 
   function viewActor(mount, id) {
@@ -570,7 +574,11 @@ export const LANDING_APP_JS = `
     mount.appendChild(el('h3', 'vtitle', 'Posts'));
     if (shorts.length === 0) mount.appendChild(el('div', 'empty', 'no posts yet'));
     shorts.forEach(function (p) { mount.appendChild(postCard(p)); });
-    fetchInteractions(shorts.map(function (p) { return p.id; })).then(function () { render(); });
+    var seqB = S.renderSeq;
+    fetchInteractions(shorts.map(function (p) { return p.id; })).then(function (fetchedB) {
+      if (fetchedB === 0 || S.renderSeq !== seqB) return;
+      render();
+    });
   }
 
   function viewTags(mount) {
