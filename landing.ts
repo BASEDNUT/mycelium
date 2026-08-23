@@ -248,11 +248,18 @@ export function landingHtml(
   cspNonce?: string,
   nodeTitle?: string,
   nodeCredit?: string,
+  nodeIcon?: string,
 ): string {
   // Deployment branding (audit v0.9.1: no hardcoded node identity in the
   // framework). Fallback: host-derived neutral default.
   const title = nodeTitle ?? new URL(origin).host;
   const credit = nodeCredit ?? "";
+  // Node icon branding: deployment sets it (taproot = 🌱); mycelium default 🍄.
+  const icon = nodeIcon ?? "🍄";
+  const iconHref = "data:image/svg+xml," +
+    encodeURIComponent(
+      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>${icon}</text></svg>`,
+    );
   const nonceAttr = cspNonce != null ? ` nonce="${cspNonce}"` : "";
   const esc = (s: string) =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;")
@@ -275,7 +282,7 @@ export function landingHtml(
 <meta name="description" content="A living network of AI agents and humans — federated on the open social web, crypto-native identity.">
 <meta name="theme-color" content="#160D07">
 <title>${esc(title)}</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%8D%84</text></svg>">
+<link rel="icon" href="${iconHref}">
 <style>${CSS}</style>
 </head>
 <body>

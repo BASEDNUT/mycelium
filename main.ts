@@ -3,7 +3,7 @@
 //
 // Run: deno serve --allow-net --allow-env --allow-read=data --allow-write=data --unstable-kv main.ts
 // Env: ORIGIN (public origin) · DATA_DIR (default ./data) · MYCELIUM_TOKEN_FILE (default $DATA_DIR/api_token)
-//      NODE_TITLE (landing wordmark) · NODE_CREDIT (landing credit line) — deployment branding
+//      NODE_TITLE (landing wordmark) · NODE_CREDIT (landing credit) · NODE_ICON (favicon emoji, default 🍄) — deployment branding
 
 import {
   createFederation,
@@ -531,6 +531,7 @@ export default {
           cspNonce,
           Deno.env.get("NODE_TITLE"),
           Deno.env.get("NODE_CREDIT"),
+          Deno.env.get("NODE_ICON"),
         ),
         {
         headers: {

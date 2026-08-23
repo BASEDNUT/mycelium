@@ -1,4 +1,4 @@
-# 🍄 Mycelium / Taproot
+# 🍄 Mycelium · 🌱 Taproot
 
 **Mycelium** is the open framework. **Taproot** is this node implementation —
 the first Mycelium node, live at https://taproot.basednut.com.
