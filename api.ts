@@ -9,6 +9,9 @@ import type {
   MyceliumStore,
   PostForm,
   PostRecord,
+  SubrootArchetype,
+  SubrootConfig,
+  SubrootRecord,
 } from "./store.ts";
 import { buildCreate, buildLocalMentionTags } from "./notes.ts";
 import { TokenAuth } from "./auth.ts";
@@ -90,6 +93,69 @@ const ACTOR_CLASSES = new Set([
   "person", "agent", "service", "group", "application", "instance",
 ]);
 const POST_FORMS = new Set<PostForm>(["short", "long"]);
+
+// ── subroots (v0.11.0) ──
+const SUBROOT_ARCHETYPES = new Set<SubrootArchetype>([
+  "feed",
+  "board",
+  "forum",
+  "meta",
+]);
+const SUBROOT_SLUG = /^[a-z0-9-]{1,32}$/;
+const MAX_SUBROOT_TITLE = 96;
+const MAX_SUBROOT_DESC = 500;
+
+/** Pure validation for subroot creation (mycelium-native, admin-gated). */
+export function validateSubroot(input: {
+  slug: string;
+  archetype: string;
+  title: string;
+  description: string;
+  config: { votes: boolean; anonymous: boolean; retentionDays: number | null };
+}): { valid: true; record: SubrootRecord } | { valid: false; error: string } {
+  const { slug, archetype, title, description, config } = input;
+  if (!SUBROOT_SLUG.test(slug)) {
+    return { valid: false, error: "slug must match [a-z0-9-]{1,32}" };
+  }
+  if (!SUBROOT_ARCHETYPES.has(archetype as SubrootArchetype)) {
+    return {
+      valid: false,
+      error: "archetype must be feed, board, forum, or meta",
+    };
+  }
+  if (!title || title.length > MAX_SUBROOT_TITLE) {
+    return { valid: false, error: `title required (max ${MAX_SUBROOT_TITLE})` };
+  }
+  if (description.length > MAX_SUBROOT_DESC) {
+    return { valid: false, error: `description too long (max ${MAX_SUBROOT_DESC})` };
+  }
+  const ret = config.retentionDays;
+  if (archetype === "board" && (ret == null || ret < 1 || ret > 365)) {
+    return { valid: false, error: "board requires retentionDays 1-365" };
+  }
+  if (archetype !== "board" && ret != null) {
+    return { valid: false, error: "retentionDays only allowed on board archetype" };
+  }
+  if (archetype === "meta" && config.anonymous === true) {
+    return { valid: false, error: "meta subroots cannot be anonymous" };
+  }
+  return {
+    valid: true,
+    record: {
+      slug,
+      archetype: archetype as SubrootArchetype,
+      title,
+      description,
+      config: {
+        votes: config.votes === true,
+        anonymous: config.anonymous === true,
+        retentionDays: ret ?? null,
+      },
+      creator: "", // filled by caller (admin bootstrap or system seed)
+      created: new Date().toISOString(),
+    },
+  };
+}
 
 export async function handleApi(
   request: Request,
@@ -184,6 +250,18 @@ export async function handleApi(
     if (await deps.store.getActor(identifier) == null) {
       return json(404, { error: "unknown actor" });
     }
+    // Optional subroot binding (v0.11.0): container must exist.
+    const subrootRaw = body.subroot == null
+      ? undefined
+      : String(body.subroot).trim().toLowerCase();
+    if (subrootRaw != null) {
+      if (!SUBROOT_SLUG.test(subrootRaw)) {
+        return json(400, { error: "invalid subroot slug" });
+      }
+      if (await deps.store.getSubroot(subrootRaw) == null) {
+        return json(404, { error: "unknown subroot" });
+      }
+    }
     // Reply target must exist: local post id or remote URI.
     // Stored value is ALWAYS a full AP URI so federation never breaks.
     let replyUri: string | undefined;
@@ -210,6 +288,7 @@ export async function handleApi(
       visibility: "public",
       form,
       title: title || undefined,
+      subroot: subrootRaw,
     };
     await deps.store.putPost(post);
 
@@ -272,6 +351,46 @@ export async function handleApi(
     return json(201, { ok: true, followersNotified, mentioned, post });
   }
 
+  // ── subroots (v0.11.0) ──
+  if (path === "/api/subroots" && request.method === "GET") {
+    if (readLimited(request, deps)) return tooMany();
+    const subs = await deps.store.listSubroots();
+    return json(200, { count: subs.length, subroots: subs });
+  }
+
+  if (path === "/api/subroot" && request.method === "POST") {
+    if (!isAdmin(request, deps)) {
+      return json(401, { error: "admin token required" });
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch {
+      return json(400, { error: "invalid json" });
+    }
+    const cfg = (body.config ?? {}) as Record<string, unknown>;
+    const result = validateSubroot({
+      slug: String(body.slug ?? "").trim().toLowerCase(),
+      archetype: String(body.archetype ?? "").trim(),
+      title: String(body.title ?? "").trim(),
+      description: String(body.description ?? "").trim(),
+      config: {
+        votes: cfg.votes === true,
+        anonymous: cfg.anonymous === true,
+        retentionDays: cfg.retentionDays == null
+          ? null
+          : Number(cfg.retentionDays),
+      },
+    });
+    if (!result.valid) return json(400, { error: result.error });
+    if (await deps.store.getSubroot(result.record.slug) != null) {
+      return json(409, { error: "subroot exists" });
+    }
+    const creator = String(body.creator ?? "__instance__").trim().toLowerCase();
+    await deps.store.putSubroot({ ...result.record, creator });
+    return json(201, { ok: true, subroot: { ...result.record, creator } });
+  }
+
   if (path === "/api/feed" && request.method === "GET") {
     if (readLimited(request, deps)) return tooMany();
     const actorParam = url.searchParams.get("actor");
@@ -289,7 +408,11 @@ export async function handleApi(
       Math.max(parseInt(url.searchParams.get("limit") ?? "50") || 50, 1),
       200,
     );
-    const posts = (await deps.store.listPosts(identifier))
+    const subrootParam = url.searchParams.get("subroot");
+    const subroot = subrootParam == null || subrootParam === ""
+      ? null
+      : subrootParam.trim().toLowerCase();
+    const posts = (await deps.store.listPosts(identifier, subroot))
       .filter((p) => form == null || (p.form ?? "short") === form)
       .filter((p) => p.isRemote !== true || p.identifier === identifier)
       // Remote posts surface publicly only when explicitly public/unlisted

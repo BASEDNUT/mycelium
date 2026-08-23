@@ -15,6 +15,26 @@ export type ActorClass =
 
 export type PostForm = "short" | "long";
 
+// ── subroots (v0.11.0, docs/subroots-identity-v1.md) ──
+// Container primitive where posts live. Reddit got this right with subreddits.
+export type SubrootArchetype = "feed" | "board" | "forum" | "meta";
+
+export interface SubrootConfig {
+  votes: boolean; // up/down votes enabled
+  anonymous: boolean; // anonymous posting allowed (boards)
+  retentionDays: number | null; // rolling deletion window (boards)
+}
+
+export interface SubrootRecord {
+  slug: string; // [a-z0-9-]{1,32}
+  archetype: SubrootArchetype;
+  title: string;
+  description: string;
+  config: SubrootConfig;
+  creator: string; // actor identifier (system seeds use "__instance__")
+  created: string;
+}
+
 export interface ActorRecord {
   identifier: string;
   actorClass: ActorClass;
@@ -39,6 +59,7 @@ export interface PostRecord {
   form: PostForm; // short = feed, long = forum
   title?: string; // long-form title
   isRemote?: boolean; // true when ingested via federation
+  subroot?: string; // optional subroot binding (v0.11.0); legacy posts have none
 }
 
 export interface FollowerRecord {
@@ -154,18 +175,42 @@ export class MyceliumStore {
     return (await this.kv.get<PostRecord>([...NS, "post", id])).value;
   }
 
-  async listPosts(identifier: string | null): Promise<PostRecord[]> {
+  async listPosts(
+    identifier: string | null,
+    subroot?: string | null,
+  ): Promise<PostRecord[]> {
     const out: PostRecord[] = [];
     for await (const e of this.kv.list<PostRecord>({ prefix: [...NS, "post"] })) {
-      if (identifier == null || e.value.identifier === identifier) {
-        out.push(e.value);
-      }
+      if (identifier != null && e.value.identifier !== identifier) continue;
+      if (subroot != null && e.value.subroot !== subroot) continue;
+      out.push(e.value);
     }
     return out;
   }
 
   async deletePost(id: string): Promise<void> {
     await this.kv.delete([...NS, "post", id]);
+  }
+
+  // ── subroots (v0.11.0) ──
+  async putSubroot(rec: SubrootRecord): Promise<void> {
+    await this.kv.set([...NS, "subroot", rec.slug], rec);
+  }
+
+  async getSubroot(slug: string): Promise<SubrootRecord | null> {
+    return (await this.kv.get<SubrootRecord>([...NS, "subroot", slug])).value;
+  }
+
+  async listSubroots(): Promise<SubrootRecord[]> {
+    const out: SubrootRecord[] = [];
+    for await (
+      const e of this.kv.list<SubrootRecord>({ prefix: [...NS, "subroot"] })
+    ) out.push(e.value);
+    return out;
+  }
+
+  async deleteSubroot(slug: string): Promise<void> {
+    await this.kv.delete([...NS, "subroot", slug]);
   }
 
   // ── likes / boosts ──
