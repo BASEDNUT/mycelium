@@ -25,6 +25,7 @@ function sampleSubroot(slug = "basednut"): SubrootRecord {
     icon: "",
     url: "",
     creator: "peanutoshi",
+    mods: [],
     created: new Date().toISOString(),
   };
 }

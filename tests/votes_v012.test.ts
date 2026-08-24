@@ -27,6 +27,7 @@ function board(slug = "board"): SubrootRecord {
     icon: "",
     url: "",
     creator: "__instance__",
+    mods: [],
     created: new Date().toISOString(),
   };
 }
@@ -41,6 +42,7 @@ function forum(slug = "basednut"): SubrootRecord {
     icon: "",
     url: "",
     creator: "__instance__",
+    mods: [],
     created: new Date().toISOString(),
   };
 }

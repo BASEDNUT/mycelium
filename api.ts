@@ -161,6 +161,7 @@ export function validateSubroot(input: {
         retentionDays: ret ?? null,
       },
       creator: "", // filled by caller (admin bootstrap or system seed)
+      mods: [],
       created: new Date().toISOString(),
     },
   };
@@ -273,17 +274,35 @@ export async function handleApi(
     if (await deps.store.getActor(postingAs) == null) {
       return json(404, { error: "unknown actor" });
     }
-    // Optional subroot binding (v0.11.0): container must exist.
-    const subrootRaw = body.subroot == null
+    // v0.14.0: subroot REQUIRED on every post. Replies inherit the parent's root.
+    let subrootRaw = body.subroot == null
       ? undefined
       : String(body.subroot).trim().toLowerCase();
-    if (subrootRaw != null) {
-      if (!SUBROOT_SLUG.test(subrootRaw)) {
-        return json(400, { error: "invalid subroot slug" });
+    if (inReplyTo != null && subrootRaw == null) {
+      if (!/^https?:\//.test(inReplyTo)) {
+        const parent0 = await deps.store.getPost(inReplyTo);
+        if (parent0 != null && parent0.subroot != null) subrootRaw = parent0.subroot;
       }
-      if (await deps.store.getSubroot(subrootRaw) == null) {
-        return json(404, { error: "unknown subroot" });
-      }
+    }
+    if (subrootRaw == null) {
+      return json(400, { error: "subroot required — every post must live in a root (/r/...)" });
+    }
+    if (!SUBROOT_SLUG.test(subrootRaw)) {
+      return json(400, { error: "invalid subroot slug" });
+    }
+    const targetRoot = await deps.store.getSubroot(subrootRaw);
+    if (targetRoot == null) {
+      return json(404, { error: "unknown subroot" });
+    }
+    // v0.14.0: board archetype = short form only (subjects allowed); forum = long form only; feed = short only.
+    if (targetRoot.archetype === "board" && form !== "short") {
+      return json(400, { error: "board roots accept short posts only" });
+    }
+    if (targetRoot.archetype === "forum" && form !== "long") {
+      return json(400, { error: "forum roots accept long-form topics only" });
+    }
+    if (targetRoot.archetype === "feed" && form !== "short") {
+      return json(400, { error: "feed root accepts short posts only" });
     }
     // Reply target must exist: local post id or remote URI.
     // Stored value is ALWAYS a full AP URI so federation never breaks.
@@ -375,6 +394,28 @@ export async function handleApi(
   }
 
   // ── subroots (v0.11.0) ──
+  // v0.14.0: delete a post. Author of the post, a moderator of the post's
+  // subroot, or the admin token may remove it.
+  if (path === "/api/post" && request.method === "DELETE") {
+    if (!deps.rateLimits.write.allow(clientKey(request))) return tooMany();
+    const id = (url.searchParams.get("id") ?? "").trim();
+    if (!id) return json(400, { error: "id query param required" });
+    const post = await deps.store.getPost(id);
+    if (post == null) return json(404, { error: "post not found" });
+    const t = bearer(request);
+    if (t == null) return json(401, { error: "auth required" });
+    let allowed = t === deps.adminToken || post.identifier === (await deps.auth.authenticate(t));
+    if (!allowed && post.subroot != null) {
+      const sr = await deps.store.getSubroot(post.subroot);
+      const actor = await deps.auth.authenticate(t);
+      allowed = sr != null && actor != null && (sr.mods ?? []).includes(actor);
+    }
+    if (!allowed) return json(403, { error: "only author, root moderator, or admin may delete" });
+    const removed = await deps.store.deletePostCascade(id);
+    return json(200, { ok: true, removed: removed + 1 });
+  }
+
+
   if (path === "/api/subroots" && request.method === "GET") {
     if (readLimited(request, deps)) return tooMany();
     const subs = await deps.store.listSubroots();
@@ -428,8 +469,9 @@ export async function handleApi(
     if (t == null) return json(401, { error: "auth required" });
     if (t !== deps.adminToken) {
       const actor = await deps.auth.authenticate(t);
-      if (actor == null || actor !== existing.creator) {
-        return json(403, { error: "only creator or admin may manage this root" });
+      const isMod = actor != null && (existing.mods ?? []).includes(actor);
+      if (actor == null || (actor !== existing.creator && !isMod)) {
+        return json(403, { error: "only creator, moderator, or admin may manage this root" });
       }
     }
     let body: Record<string, unknown>;
@@ -439,7 +481,7 @@ export async function handleApi(
       ? existing.description
       : String(body.description).trim();
     const icon = body.icon == null ? existing.icon : String(body.icon).trim().slice(0, 16);
-    const extUrl = body.url == null ? existing.url : String(body.url).trim();
+    const extUrl = body.url == null ? (existing.url ?? "") : String(body.url).trim();
     const cfgIn = (body.config ?? existing.config) as Record<string, unknown>;
     const config = {
       votes: cfgIn.votes === true,
@@ -455,7 +497,20 @@ export async function handleApi(
     if (!title || title.length > MAX_SUBROOT_TITLE) return json(400, { error: "title required (max 96)" });
     if (description.length > MAX_SUBROOT_DESC) return json(400, { error: "description too long" });
     if (extUrl !== "" && !/^https?:\/\/\S{1,300}$/.test(extUrl)) return json(400, { error: "url must be http(s) link" });
-    const updated = await deps.store.updateSubroot(slug, { title, description, icon, url: extUrl, config });
+    let mods = existing.mods ?? [];
+    if (Array.isArray(body.mods)) {
+      if (t !== deps.adminToken) {
+        const who = await deps.auth.authenticate(t);
+        if (who !== existing.creator) {
+          return json(403, { error: "only creator or admin may change moderators" });
+        }
+      }
+      mods = [...new Set(body.mods.map((m: unknown) => String(m).trim().toLowerCase()).filter((m: string) => m.length > 0))].slice(0, 20);
+      for (const m of mods) {
+        if (await deps.store.getActor(m) == null) return json(404, { error: "unknown moderator actor: " + m });
+      }
+    }
+    const updated = await deps.store.updateSubroot(slug, { title, description, icon, url: extUrl, config, mods });
     return json(200, { ok: true, subroot: updated });
   }
 

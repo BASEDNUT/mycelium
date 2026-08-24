@@ -34,6 +34,7 @@ export interface SubrootRecord {
   url: string; // external link, optional (v0.13.0)
   config: SubrootConfig;
   creator: string; // actor identifier (system seeds use "__instance__")
+  mods: string[]; // moderator identifiers (v0.14.0)
   created: string;
 }
 
@@ -224,7 +225,7 @@ export class MyceliumStore {
    */
   async updateSubroot(
     slug: string,
-    patch: Partial<Pick<SubrootRecord, "title" | "description" | "icon" | "url" | "config">>,
+    patch: Partial<Pick<SubrootRecord, "title" | "description" | "icon" | "url" | "config" | "mods">>,
   ): Promise<SubrootRecord | null> {
     const cur = await this.getSubroot(slug);
     if (cur == null) return null;
@@ -235,6 +236,7 @@ export class MyceliumStore {
       ...(patch.icon != null ? { icon: patch.icon } : {}),
       ...(patch.url != null ? { url: patch.url } : {}),
       ...(patch.config != null ? { config: patch.config } : {}),
+      ...(patch.mods != null ? { mods: patch.mods } : {}),
     };
     await this.putSubroot(next);
     return next;

@@ -181,6 +181,29 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .mrow{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
 .mrow label{font-size:12px;color:var(--muted)}
 @media(max-width:720px){.rhero{padding:14px}.rheroacts{width:100%}}
+/* v0.14.0: 4chan-style board */
+.bthread{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:0 0 14px}
+.bintro{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;font-size:12px;color:var(--dim)}
+.bsubject{font-weight:700;color:var(--text);font-size:14px}
+.bname{color:var(--accent);font-weight:600}
+.btime{color:var(--dim)}
+.bno{color:var(--dim);cursor:pointer}
+.bbody{margin-top:6px;font-size:14px;line-height:1.5;color:var(--text);white-space:pre-wrap;word-break:break-word}
+.greentext{color:#789922}
+.breplybtn{margin-top:8px;background:none;border:1px solid var(--line);color:var(--accent);border-radius:6px;padding:2px 10px;font-size:12px;cursor:pointer}
+.breplybtn:hover{border-color:var(--accent)}
+.breplies{margin:-6px 0 14px 26px;border-left:2px solid var(--line);padding-left:12px}
+/* v0.14.0: subreddit-style forum */
+.frow{display:flex;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:10px}
+.frow:hover{border-color:var(--accent)}
+.fvote{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:32px}
+.fscore{font-size:13px;font-weight:700;color:var(--text)}
+.fmid{display:flex;flex-direction:column;gap:4px;min-width:0}
+.ftitle{font-size:15px;font-weight:600;color:var(--text);text-decoration:none}
+.ftitle:hover{color:var(--accent)}
+.fmeta{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline;font-size:12px;color:var(--dim)}
+.fcomments{color:var(--accent);text-decoration:none;font-size:12px}
+.fcomments:hover{text-decoration:underline}
 .rrow{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1px solid var(--line,#2a2a2a);border-radius:10px;margin-bottom:8px;text-decoration:none;color:inherit}
 .rrow:hover{border-color:var(--gold,#d8a24a)}
 .rname{font-weight:700}

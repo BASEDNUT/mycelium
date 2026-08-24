@@ -28,6 +28,7 @@ function board(slug = "board", retentionDays = 1): SubrootRecord {
     url: "",
     config: { votes: false, anonymous: true, retentionDays },
     creator: "__instance__",
+    mods: [],
     created: new Date().toISOString(),
   };
 }
@@ -42,6 +43,7 @@ function forum(slug = "basednut"): SubrootRecord {
     url: "",
     config: { votes: true, anonymous: false, retentionDays: null },
     creator: "peanutoshi",
+    mods: [],
     created: new Date().toISOString(),
   };
 }

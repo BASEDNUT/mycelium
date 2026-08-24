@@ -715,7 +715,138 @@ export const LANDING_APP_JS = `
     var list;
     if (isFeed) list = S.posts.filter(function (p) { return (p.form || 'short') !== 'long'; });
     else list = S.posts.filter(function (p) { return p.subroot === slug; });
-    postList(mount, list, sr.archetype === 'forum' ? 'table' : 'cards');
+    if (isBoard) boardList(mount, list, slug);
+    else if (sr.archetype === 'forum') forumList(mount, list);
+    else postList(mount, list, 'cards');
+  }
+
+  // ── v0.14.0: 4chan-style board renderer (threads: OP + inline replies) ──
+  function shortNo(id) {
+    var h = 0;
+    for (var i = 0; i < id.length && i < 12; i++) { h = (h * 31 + id.charCodeAt(i)) >>> 0; }
+    return h % 100000;
+  }
+  function greenText(node, content) {
+    var lines = content.split('\n');
+    lines.forEach(function (ln, i) {
+      if (i > 0) node.appendChild(document.createElement('br'));
+      if (ln.charAt(0) === '>') {
+        var g = el('span', 'greentext', ln);
+        node.appendChild(g);
+      } else {
+        var t = el('span', null, ln);
+        node.appendChild(t);
+      }
+    });
+  }
+  function boardPost(p, opts) {
+    opts = opts || {};
+    var isOP = !p.inReplyTo;
+    var d = el('div', isOP ? 'bop' : 'breply');
+    if (isOP) d.classList.add('bthread');
+    var intro = el('div', 'bintro');
+    if (p.title) intro.appendChild(el('span', 'bsubject', p.title));
+    var nm = p.identifier === 'anonymous' ? 'Anonymous' : '@' + p.identifier;
+    intro.appendChild(el('span', 'bname', nm));
+    var t = el('span', 'btime', fmtTime(p.published));
+    intro.appendChild(t);
+    var no = el('span', 'bno', 'No.' + shortNo(p.id));
+    intro.appendChild(no);
+    d.appendChild(intro);
+    var body = el('div', 'bbody');
+    greenText(body, p.content);
+    d.appendChild(body);
+    if (isOP) {
+      var rep = el('button', 'breplybtn', 'Reply');
+      rep.onclick = function () { openBoardReply(p.id, opts.slug); };
+      d.appendChild(rep);
+    }
+    return d;
+  }
+  function openBoardReply(parentId, slug) {
+    if (!S.me || !S.me.actor) { toast('sign in to reply, or post a new thread'); return; }
+    var ov = el('div', 'overlay');
+    var box = el('div', 'cbox');
+    var h = el('div', 'chead');
+    h.appendChild(el('span', 'ctitle', 'Reply to No.' + shortNo(parentId)));
+    var x = el('button', 'iconbtn', '\u2715'); x.onclick = function () { ov.remove(); };
+    h.appendChild(x); box.appendChild(h);
+    var ta = el('textarea', 'ctext'); ta.placeholder = 'Reply...'; ta.maxLength = 5000;
+    box.appendChild(ta);
+    var go = el('button', 'goldbtn', 'Reply');
+    go.onclick = function () {
+      var c = ta.value.trim();
+      if (!c) { toast('empty'); return; }
+      api('/api/post', 'POST', {
+        identifier: S.me.actor, content: c, form: 'short',
+        subroot: slug, inReplyTo: parentId,
+      }).then(function (j) {
+        if (j._status === 201) {
+          ov.remove(); toast('reply posted');
+          return api('/api/feed?limit=200').then(function (f2) {
+            if (f2._status === 200) { S.posts = f2.posts || S.posts; buildTagIndex(); buildReplies(); }
+            render();
+          });
+        }
+        toast(j.error || 'failed');
+      }).catch(function () { toast('network error'); });
+    };
+    var f = el('div', 'cfoot'); f.appendChild(el('span', 'ccount', '')); f.appendChild(go); box.appendChild(f);
+    ov.appendChild(box); document.body.appendChild(ov); ta.focus();
+  }
+  function boardList(mount, list, slug) {
+    var threads = list.filter(function (p) { return !p.inReplyTo; });
+    threads.sort(function (x, y) { return y.published.localeCompare(x.published); });
+    if (threads.length === 0) { mount.appendChild(el('div', 'empty', 'no threads yet \u2014 start one above')); return; }
+    threads.forEach(function (op) {
+      mount.appendChild(boardPost(op, { slug: slug }));
+      var replies = list.filter(function (p) {
+        return p.inReplyTo && (p.inReplyTo.indexOf(op.id) !== -1 || p.inReplyTo.indexOf('/p/' + op.id) !== -1);
+      });
+      replies.sort(function (x, y) { return x.published.localeCompare(y.published); });
+      var rc = el('div', 'breplies');
+      replies.slice(0, 8).forEach(function (r) { rc.appendChild(boardPost(r)); });
+      mount.appendChild(rc);
+    });
+  }
+
+  // ── v0.14.0: subreddit-style forum renderer (vote column + topic rows) ──
+  function forumRow(p) {
+    var a = authorOf(p);
+    var r = el('div', 'frow');
+    var vc = el('div', 'fvote');
+    if (!votesOn(p)) vc.style.visibility = 'hidden';
+    var up = el('button', 'varrow', '\u25B2');
+    var sc = el('div', 'fscore', String(S.interactions[p.id] && S.interactions[p.id].score != null ? S.interactions[p.id].score : 0));
+    var dn = el('button', 'varrow', '\u25BC');
+    up.onclick = function () { toggleVote(1, p.id); };
+    dn.onclick = function () { toggleVote(-1, p.id); };
+    vc.appendChild(up); vc.appendChild(sc); vc.appendChild(dn);
+    r.appendChild(vc);
+    var mid = el('div', 'fmid');
+    var tt = el('a', 'ftitle', p.title || '(untitled)');
+    tt.href = '#/topic/' + encodeURIComponent(p.id);
+    mid.appendChild(tt);
+    var meta = el('div', 'fmeta');
+    meta.appendChild(el('span', 'fby', 'by @' + a.identifier));
+    meta.appendChild(el('span', 'fdot', '\u00B7'));
+    meta.appendChild(el('span', 'ftime', fmtTime(p.published)));
+    var nreplies = S.posts.filter(function (q) {
+      return q.inReplyTo && (q.inReplyTo.indexOf(p.id) !== -1 || q.inReplyTo.indexOf('/p/' + p.id) !== -1);
+    }).length;
+    var cm = el('a', 'fcomments', nreplies + ' comments');
+    cm.href = '#/topic/' + encodeURIComponent(p.id);
+    meta.appendChild(el('span', 'fdot', '\u00B7'));
+    meta.appendChild(cm);
+    mid.appendChild(meta);
+    r.appendChild(mid);
+    return r;
+  }
+  function forumList(mount, list) {
+    var topics = list.filter(function (p) { return !p.inReplyTo; });
+      var sx = (S.interactions[x.id] && S.interactions[x.id].score) || 0;
+      var sy = (S.interactions[y.id] && S.interactions[y.id].score) || 0;
+      return sy - sx || y.published.localeCompare(x.published);
   }
 
   function anonComposer(slug) {
