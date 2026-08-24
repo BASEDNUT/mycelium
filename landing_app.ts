@@ -778,6 +778,19 @@ export const LANDING_APP_JS = `
     meta.appendChild(el('span', 'am', '\u{1F517} ' + (S.degree['actor:' + a.identifier] || 0) + ' links'));
     var pc = 0; S.posts.forEach(function (p) { if (p.identifier === a.identifier) pc++; });
     meta.appendChild(el('span', 'am', '\u270D ' + pc + ' posts'));
+    var gotL = 0, gotB = 0, gotR = 0;
+    S.posts.forEach(function (p) {
+      if (p.identifier === a.identifier) {
+        var it = S.interactions[p.id];
+        if (it) { gotL += (it.likeCount || 0); gotB += (it.boostCount || 0); }
+        gotR += (S.replies[p.id] || 0);
+      }
+    });
+    if (pc > 0) {
+      meta.appendChild(el('span', 'am', '\u2665 ' + gotL));
+      meta.appendChild(el('span', 'am', '\u{1F501} ' + gotB));
+      meta.appendChild(el('span', 'am', '\u{1F4AC} ' + gotR));
+    }
     head.appendChild(meta);
     if (S.me && S.me.actor !== a.identifier) {
       var f = el('button', 'followbtn' + (isFollowing(a.identifier) ? ' on' : ''), isFollowing(a.identifier) ? 'Following' : 'Follow');
@@ -876,6 +889,14 @@ export const LANDING_APP_JS = `
     }
     hero.appendChild(acts);
     mount.appendChild(hero);
+    var slist = isFeed ? S.posts.filter(function (p) { return (p.form || 'short') !== 'long'; }) : S.posts.filter(function (p) { return p.subroot === slug; });
+    var srepl = 0; var svoc = {};
+    slist.forEach(function (p) { svoc[p.identifier || 'anonymous'] = true; if (p.subroot === slug) srepl += (S.replies[p.id] || 0); });
+    var strip = el('div', 'rstats');
+    strip.appendChild(el('span', 'arpill', slist.length + ' posts'));
+    strip.appendChild(el('span', 'arpill', Object.keys(svoc).length + ' voices'));
+    if (!isFeed) strip.appendChild(el('span', 'arpill', srepl + ' replies'));
+    mount.appendChild(strip);
     if (isBoard) mount.appendChild(anonComposer(slug));
     var list;
     if (isFeed) list = S.posts.filter(function (p) { return (p.form || 'short') !== 'long'; });
@@ -1454,6 +1475,7 @@ export const LANDING_APP_JS = `
   rail.appendChild(navItem('#/messages', '\u{1F4AC}', 'Messages'));
     rail.appendChild(navItem('#/settings', '\u2699\uFE0F', 'Settings'));
     rail.appendChild(navItem('#/docs', '\u{1F4D6}', 'Docs'));
+    rail.appendChild(navItem('#/admin', '\u{1F4CA}', 'Admin'));
     body.appendChild(rail);
     var main = el('main', 'main'); main.id = 'main'; main.dataset.live = '1';
     body.appendChild(main);
@@ -1468,6 +1490,111 @@ export const LANDING_APP_JS = `
     fab.onclick = function () { openComposer(false); };
     app.appendChild(fab);
     document.body.appendChild(app);
+  }
+
+  // ── v0.18.0: admin dashboard ──
+  function adminApi(path, method, body) {
+    var tk = localStorage.getItem('myc_admin_token') || '';
+    var opt = { method: method || 'GET', headers: { 'Authorization': 'Bearer ' + tk } };
+    if (body != null) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
+    return fetch(path, opt).then(function (r) {
+      return r.json().then(function (j) { j._status = r.status; return j; });
+    });
+  }
+  function dashCard(label, val, sub) {
+    var c = el('div', 'statcard');
+    c.appendChild(el('div', 'statval', String(val)));
+    c.appendChild(el('div', 'statlabel', label));
+    if (sub) c.appendChild(el('div', 'statsub', sub));
+    return c;
+  }
+  function rootPostCount(slug) {
+    var n = 0;
+    S.posts.forEach(function (p) { if (p.subroot === slug) n++; });
+    return n;
+  }
+  function resolveReport(id, action) {
+    adminApi('/api/moderation/resolve', 'POST', { id: id, action: action }).then(function (j) {
+      if (j._status === 200) {
+        toast(action === 'dismiss' ? 'report dismissed' : 'post deleted');
+        return api('/api/feed?limit=200').then(function (f2) {
+          if (f2._status === 200) { S.posts = f2.posts || S.posts; buildTagIndex(); buildReplies(); }
+          render();
+        });
+      }
+      toast(j.error || 'failed');
+    }).catch(function () { toast('network error'); });
+  }
+  function viewAdmin(mount) {
+    mount.appendChild(viewHeader('Admin'));
+    mount.appendChild(el('p', 'herosub', 'Node dashboard \u2014 pulse, roots, and the moderation queue.'));
+    var tk = localStorage.getItem('myc_admin_token') || '';
+    var contrib = {};
+    S.posts.forEach(function (p) { if (p.identifier) contrib[p.identifier] = true; });
+    var grid = el('div', 'dashgrid');
+    grid.appendChild(dashCard('Actors', S.actors.length, 'identities on this node'));
+    grid.appendChild(dashCard('Posts', S.posts.length, 'current feed window'));
+    grid.appendChild(dashCard('Roots', (S.subroots || []).length, 'subroots'));
+    grid.appendChild(dashCard('Voices', Object.keys(contrib).length, 'distinct authors'));
+    mount.appendChild(grid);
+    var tbl = el('div', 'panel');
+    tbl.appendChild(el('h3', 'ptitle', 'Per-root activity'));
+    var roots = (S.subroots || []).slice().sort(function (a, b) { return rootPostCount(b.slug) - rootPostCount(a.slug); });
+    roots.forEach(function (sr) {
+      var r = el('a', 'srow dashrow');
+      r.href = '#/r/' + encodeURIComponent(sr.slug);
+      r.appendChild(el('span', 'slabel', (sr.icon ? sr.icon + ' ' : '') + '/r/' + sr.slug + ' \u00B7 ' + (sr.archetype || '')));
+      r.appendChild(el('span', 'sval', rootPostCount(sr.slug) + ' posts'));
+      tbl.appendChild(r);
+    });
+    if (roots.length === 0) tbl.appendChild(el('div', 'empty', 'no roots'));
+    mount.appendChild(tbl);
+    var q = el('div', 'panel');
+    q.appendChild(el('h3', 'ptitle', 'Moderation queue'));
+    var gate = el('div', 'dmform');
+    var inp = el('input', 'ainput');
+    inp.type = 'password'; inp.placeholder = 'admin token'; inp.value = tk;
+    var go = el('button', 'goldbtn', 'Unlock');
+    go.onclick = function () {
+      var v = inp.value.trim();
+      if (v) localStorage.setItem('myc_admin_token', v);
+      else localStorage.removeItem('myc_admin_token');
+      render();
+    };
+    gate.appendChild(inp); gate.appendChild(go);
+    q.appendChild(el('div', 'slabel', 'Operator token. Stored locally on this device only.'));
+    q.appendChild(gate);
+    mount.appendChild(q);
+    if (!tk) { q.appendChild(el('div', 'empty', 'enter admin token to load reports')); return; }
+    var holder = el('div', null, null);
+    holder.appendChild(el('div', 'empty', 'loading\u2026'));
+    q.appendChild(holder);
+    adminApi('/api/moderation/queue?status=open').then(function (j) {
+      clear(holder);
+      if (j._status !== 200) { holder.appendChild(el('div', 'empty', j.error || 'queue unavailable')); return; }
+      var reps = j.reports || [];
+      if (reps.length === 0) { holder.appendChild(el('div', 'empty', 'queue clear \u2014 no open reports')); return; }
+      reps.forEach(function (rp) {
+        var c = el('div', 'modcard');
+        var l1 = el('div', 'modline');
+        l1.appendChild(el('span', 'slabel', '#' + String(rp.id).slice(0, 8) + ' \u00B7 ' + (rp.reason || 'report')));
+        l1.appendChild(el('span', 'sval', '@' + rp.reporter + ' \u00B7 ' + fmtTime(rp.created)));
+        c.appendChild(l1);
+        var pt = null;
+        S.posts.forEach(function (p) { if (p.id === rp.postId) pt = p; });
+        if (pt) c.appendChild(el('div', 'modnote', String(pt.content).slice(0, 140)));
+        else c.appendChild(el('div', 'modnote', 'post ' + String(rp.postId).slice(0, 8) + ' (outside feed window)'));
+        if (rp.note) c.appendChild(el('div', 'modnote', 'note: ' + rp.note));
+        var bar = el('div', 'modbar');
+        var dis = el('button', 'ghostbtn sm', 'Dismiss');
+        dis.onclick = function () { resolveReport(rp.id, 'dismiss'); };
+        var del = el('button', 'goldbtn sm', 'Delete post');
+        del.onclick = function () { resolveReport(rp.id, 'delete_post'); };
+        bar.appendChild(dis); bar.appendChild(del);
+        c.appendChild(bar);
+        holder.appendChild(c);
+      });
+    }).catch(function () { clear(holder); holder.appendChild(el('div', 'empty', 'network error')); });
   }
 
   // ── router ──
@@ -1491,6 +1618,7 @@ export const LANDING_APP_JS = `
     else if (h === '#/settings') viewSettings(main);
     else if (h === '#/docs') viewDocs(main);
     else if (h === '#/signin') viewSignin(main);
+    else if (h === '#/admin') viewAdmin(main);
     else viewExplore(main);
     } catch (e) {
       var card = el('div', 'card');

@@ -121,6 +121,19 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:8px}
 .ptitle{font-size:15px;color:var(--cream)}
 .srow{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);gap:10px}
+.dashgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:14px 0}
+.statcard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:2px}
+.statval{font-size:26px;font-weight:700;color:var(--gold);line-height:1.2}
+.statlabel{font-size:13px;font-weight:600}
+.statsub{font-size:11px;color:var(--muted)}
+.dashrow{text-decoration:none;padding:8px 10px;border-radius:10px}
+.dashrow:hover{background:var(--panel2)}
+.modcard{border:1px solid var(--line);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px;margin-top:8px;background:var(--panel2)}
+.modline{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:baseline}
+.modnote{font-size:13px;color:var(--muted);word-break:break-word}
+.modbar{display:flex;gap:8px;flex-wrap:wrap}
+.rstats{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 2px}
+.ainput{flex:1;min-width:180px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:14px}
 .sval{color:var(--bark);font-weight:600}
 .drow{display:flex;align-items:center;gap:10px;padding:6px 0;color:var(--cream);font-size:13px}
 .drow:hover{color:var(--gold)}
