@@ -72,6 +72,42 @@ export interface VoteRecord {
   voted: string;
 }
 
+export interface DmRecord {
+  id: string;
+  from: string;
+  to: string;
+  content: string;
+  sent: string;
+}
+
+export interface BookmarkRecord {
+  actorId: string;
+  postId: string;
+  saved: string;
+}
+
+export const REPORT_REASONS = [
+  "illegal",
+  "nsfw",
+  "spam",
+  "harassment",
+  "other",
+] as const;
+export type ReportReason = (typeof REPORT_REASONS)[number];
+
+export interface ReportRecord {
+  id: string;
+  postId: string;
+  reporter: string;
+  reason: ReportReason;
+  note: string;
+  status: "open" | "resolved";
+  action: "" | "dismiss" | "delete_post";
+  created: string;
+  resolvedAt?: string;
+}
+
+
 export interface FollowerRecord {
   id: string;
   followerId: string;
@@ -267,6 +303,68 @@ export class MyceliumStore {
   async deleteVote(postId: string, actorId: string): Promise<void> {
     await this.kv.delete([...NS, "vote", postId, actorId]);
   }
+
+  // ── DMs (v0.15.0) ──
+  async putDm(rec: DmRecord): Promise<void> {
+    await this.kv.set([...NS, "dm", rec.to, rec.id], rec);
+    await this.kv.set([...NS, "dm_outbox", rec.from, rec.id], rec);
+  }
+
+  async listDms(actor: string): Promise<DmRecord[]> {
+    const out: DmRecord[] = [];
+    for await (
+      const e of this.kv.list<DmRecord>({ prefix: [...NS, "dm", actor] })
+    ) out.push(e.value);
+    return out.sort((a, b) => b.sent.localeCompare(a.sent));
+  }
+
+  // ── bookmarks (v0.15.0) ──
+  async putBookmark(actorId: string, postId: string): Promise<void> {
+    await this.kv.set([...NS, "bookmark", actorId, postId], {
+      actorId,
+      postId,
+      saved: new Date().toISOString(),
+    } satisfies BookmarkRecord);
+  }
+
+  async getBookmark(actorId: string, postId: string): Promise<BookmarkRecord | null> {
+    return (
+      await this.kv.get<BookmarkRecord>([...NS, "bookmark", actorId, postId])
+    ).value;
+  }
+
+  async deleteBookmark(actorId: string, postId: string): Promise<void> {
+    await this.kv.delete([...NS, "bookmark", actorId, postId]);
+  }
+
+  async listBookmarks(actorId: string): Promise<BookmarkRecord[]> {
+    const out: BookmarkRecord[] = [];
+    for await (
+      const e of this.kv.list<BookmarkRecord>({
+        prefix: [...NS, "bookmark", actorId],
+      })
+    ) out.push(e.value);
+    return out.sort((a, b) => b.saved.localeCompare(a.saved));
+  }
+
+  // ── reports (v0.15.0) ──
+  async putReport(rec: ReportRecord): Promise<void> {
+    await this.kv.set([...NS, "report", rec.id], rec);
+  }
+
+  async getReport(id: string): Promise<ReportRecord | null> {
+    return (await this.kv.get<ReportRecord>([...NS, "report", id])).value;
+  }
+
+  async listReports(status?: "open" | "resolved"): Promise<ReportRecord[]> {
+    const out: ReportRecord[] = [];
+    for await (
+      const e of this.kv.list<ReportRecord>({ prefix: [...NS, "report"] })
+    ) out.push(e.value);
+    out.sort((a, b) => b.created.localeCompare(a.created));
+    return status == null ? out : out.filter((r) => r.status === status);
+  }
+
 
   /** Delete a post and its attached votes (retention sweeper helper). */
   async deletePostCascade(id: string): Promise<number> {

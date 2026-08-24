@@ -12,7 +12,13 @@ import type {
   SubrootArchetype,
   SubrootConfig,
   SubrootRecord,
+  DmRecord,
+  BookmarkRecord,
+  ReportRecord,
+  ReportReason,
 } from "./store.ts";
+import { REPORT_REASONS } from "./store.ts";
+import { hotScore, wilsonScore } from "./ranking.ts";
 import { buildCreate, buildLocalMentionTags } from "./notes.ts";
 import { TokenAuth } from "./auth.ts";
 import type { NodeRateLimits } from "./ratelimit.ts";
@@ -295,9 +301,7 @@ export async function handleApi(
       return json(404, { error: "unknown subroot" });
     }
     // v0.14.0: board archetype = short form only (subjects allowed); forum = long form only; feed = short only.
-    if (targetRoot.archetype === "board" && form !== "short") {
-      return json(400, { error: "board roots accept short posts only" });
-    }
+    // v0.15.0: board accepts both short and long form (normal forum posts).
     if (targetRoot.archetype === "forum" && form !== "long") {
       return json(400, { error: "forum roots accept long-form topics only" });
     }
@@ -547,7 +551,12 @@ export async function handleApi(
     const subroot = subrootParam == null || subrootParam === ""
       ? null
       : subrootParam.trim().toLowerCase();
-    const posts = (await deps.store.listPosts(identifier, subroot))
+    const sortParam = url.searchParams.get("sort");
+    const sort = sortParam == null || sortParam === "" ? "new" : sortParam;
+    if (sort !== "new" && sort !== "top" && sort !== "hot") {
+      return json(400, { error: "sort must be new, top, or hot" });
+    }
+    let posts = (await deps.store.listPosts(identifier, subroot))
       .filter((p) => form == null || (p.form ?? "short") === form)
       .filter((p) => p.isRemote !== true || p.identifier === identifier)
       // Remote posts surface publicly only when explicitly public/unlisted
@@ -555,9 +564,24 @@ export async function handleApi(
       .filter((p) =>
         p.isRemote !== true || p.visibility === "public" ||
         p.visibility === "unlisted"
-      )
-      .sort((a, b) => b.published.localeCompare(a.published))
-      .slice(0, limit);
+      );
+    if (sort === "new") {
+      posts = posts.sort((a, b) => b.published.localeCompare(a.published));
+    } else {
+      const scored: { post: typeof posts[number]; score: number }[] = [];
+      for (const p of posts) {
+        const votes = await deps.store.listVotes(p.id);
+        const up = votes.filter((v) => v.value === 1).length;
+        const down = votes.filter((v) => v.value === -1).length;
+        const ageH =
+          (Date.now() - new Date(p.published).getTime()) / 3.6e6;
+        const score = sort === "top" ? wilsonScore(up, down) : hotScore(up, down, ageH);
+        scored.push({ post: p, score });
+      }
+      scored.sort((a, b) => b.score - a.score);
+      posts = scored.map((x) => x.post);
+    }
+    posts = posts.slice(0, limit);
     return json(200, { count: posts.length, posts });
   }
 
@@ -964,6 +988,194 @@ export async function handleApi(
       voted: new Date().toISOString(),
     });
     return json(201, { voted: value });
+  }
+
+  // ── DMs (v0.15.0) ──
+  if (path === "/api/dm" && request.method === "POST") {
+    if (!deps.rateLimits.write.allow(clientKey(request))) return tooMany();
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch {
+      return json(400, { error: "invalid json" });
+    }
+    const identifier = String(body.identifier ?? "").trim().toLowerCase();
+    const to = String(body.to ?? "").trim().toLowerCase();
+    const content = String(body.content ?? "").trim();
+    if (!identifier || !to) {
+      return json(400, { error: "identifier and to required" });
+    }
+    if (!content) return json(400, { error: "content required" });
+    if (content.length > 2000) {
+      return json(400, { error: "content too long (max 2000)" });
+    }
+    if (!(await requireActor(request, deps, identifier))) {
+      return json(401, { error: "unauthorized for actor: " + identifier });
+    }
+    if (identifier === to) {
+      return json(400, { error: "cannot DM yourself" });
+    }
+    if ((await deps.store.getActor(to)) == null) {
+      return json(404, { error: "unknown recipient" });
+    }
+    const dm: DmRecord = {
+      id: crypto.randomUUID(),
+      from: identifier,
+      to,
+      content,
+      sent: new Date().toISOString(),
+    };
+    await deps.store.putDm(dm);
+    return json(201, { ok: true, dm });
+  }
+
+  if (path === "/api/dm" && request.method === "GET") {
+    if (readLimited(request, deps)) return tooMany();
+    const actorParam = (url.searchParams.get("actor") ?? "").trim().toLowerCase();
+    if (!actorParam) return json(400, { error: "actor required" });
+    if (!(await requireActor(request, deps, actorParam))) {
+      return json(401, { error: "unauthorized for actor: " + actorParam });
+    }
+    const withParam = (url.searchParams.get("with") ?? "").trim().toLowerCase();
+    let dms = await deps.store.listDms(actorParam);
+    if (withParam) {
+      dms = dms.filter(
+        (dm) => dm.from === withParam || dm.to === withParam,
+      );
+    }
+    return json(200, { count: dms.length, dms });
+  }
+
+  // ── bookmarks (v0.15.0) ──
+  if (path === "/api/bookmark" && request.method === "POST") {
+    if (!deps.rateLimits.write.allow(clientKey(request))) return tooMany();
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch {
+      return json(400, { error: "invalid json" });
+    }
+    const identifier = String(body.identifier ?? "").trim().toLowerCase();
+    const postId = String(body.postId ?? "").trim();
+    if (!identifier || !postId) {
+      return json(400, { error: "identifier and postId required" });
+    }
+    if (!(await requireActor(request, deps, identifier))) {
+      return json(401, { error: "unauthorized for actor: " + identifier });
+    }
+    if ((await deps.store.getPost(postId)) == null) {
+      return json(404, { error: "unknown post" });
+    }
+    await deps.store.putBookmark(identifier, postId);
+    return json(201, { ok: true, bookmarked: postId });
+  }
+
+  if (path === "/api/bookmarks" && request.method === "GET") {
+    if (readLimited(request, deps)) return tooMany();
+    const actorParam = (url.searchParams.get("actor") ?? "").trim().toLowerCase();
+    if (!actorParam) return json(400, { error: "actor required" });
+    if (!(await requireActor(request, deps, actorParam))) {
+      return json(401, { error: "unauthorized for actor: " + actorParam });
+    }
+    const bookmarks = await deps.store.listBookmarks(actorParam);
+    return json(200, { count: bookmarks.length, bookmarks });
+  }
+
+  if (path === "/api/bookmark" && request.method === "DELETE") {
+    if (!deps.rateLimits.write.allow(clientKey(request))) return tooMany();
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch {
+      return json(400, { error: "invalid json" });
+    }
+    const identifier = String(body.identifier ?? "").trim().toLowerCase();
+    const postId = String(body.postId ?? "").trim();
+    if (!identifier || !postId) {
+      return json(400, { error: "identifier and postId required" });
+    }
+    if (!(await requireActor(request, deps, identifier))) {
+      return json(401, { error: "unauthorized for actor: " + identifier });
+    }
+    await deps.store.deleteBookmark(identifier, postId);
+    return json(200, { ok: true, removed: postId });
+  }
+
+  // ── reports + moderation (v0.15.0) ──
+  if (path === "/api/report" && request.method === "POST") {
+    if (!deps.rateLimits.write.allow(clientKey(request))) return tooMany();
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch {
+      return json(400, { error: "invalid json" });
+    }
+    const identifier = String(body.identifier ?? "").trim().toLowerCase();
+    const postId = String(body.postId ?? "").trim();
+    const reason = String(body.reason ?? "").trim().toLowerCase();
+    const note = String(body.note ?? "").trim().slice(0, 500);
+    if (!identifier || !postId) {
+      return json(400, { error: "identifier and postId required" });
+    }
+    if (!(REPORT_REASONS as readonly string[]).includes(reason)) {
+      return json(400, { error: "reason must be one of " + REPORT_REASONS.join(", ") });
+    }
+    if (!(await requireActor(request, deps, identifier))) {
+      return json(401, { error: "unauthorized for actor: " + identifier });
+    }
+    if ((await deps.store.getPost(postId)) == null) {
+      return json(404, { error: "unknown post" });
+    }
+    const report: ReportRecord = {
+      id: crypto.randomUUID(),
+      postId,
+      reporter: identifier,
+      reason: reason as ReportReason,
+      note,
+      status: "open",
+      action: "",
+      created: new Date().toISOString(),
+    };
+    await deps.store.putReport(report);
+    return json(201, { ok: true, report });
+  }
+
+  if (path === "/api/moderation/queue" && request.method === "GET") {
+    if (!isAdmin(request, deps)) return json(403, { error: "admin token required" });
+    const statusParam = url.searchParams.get("status");
+    const status =
+      statusParam === "open" || statusParam === "resolved" ? statusParam : undefined;
+    const reports = await deps.store.listReports(status);
+    return json(200, { count: reports.length, reports });
+  }
+
+  if (path === "/api/moderation/resolve" && request.method === "POST") {
+    if (!isAdmin(request, deps)) return json(403, { error: "admin token required" });
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch {
+      return json(400, { error: "invalid json" });
+    }
+    const id = String(body.id ?? "").trim();
+    const action = String(body.action ?? "").trim();
+    if (!id) return json(400, { error: "id required" });
+    if (action !== "dismiss" && action !== "delete_post") {
+      return json(400, { error: "action must be dismiss or delete_post" });
+    }
+    const report = await deps.store.getReport(id);
+    if (report == null) return json(404, { error: "unknown report" });
+    if (report.status === "resolved") {
+      return json(409, { error: "report already resolved" });
+    }
+    if (action === "delete_post") {
+      await deps.store.deletePost(report.postId);
+    }
+    report.status = "resolved";
+    report.action = action;
+    report.resolvedAt = new Date().toISOString();
+    await deps.store.putReport(report);
+    return json(200, { ok: true, resolved: id, action });
   }
 
   // ── token management (admin only) ──

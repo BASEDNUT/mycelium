@@ -115,22 +115,28 @@ Deno.test("v014: reply inherits parent subroot", async () => {
   ok(j.post.subroot === "memes", "subroot inherited, got " + j.post.subroot);
 });
 
-Deno.test("v014: board rejects long-form, forum rejects short-form", async () => {
+Deno.test("v014: board accepts both forms, forum rejects short-form", async () => {
   const store = await memStore();
   await store.putActor(person);
   await store.putSubroot(root("b", "board"));
   await store.putSubroot(root("f", "forum"));
   const d = deps(store, "adm");
+  // v0.15.0 spec: board = normal forum post, long-form allowed.
   const r1 = await handleApi(
     req("POST", "/api/post", { identifier: "peanutoshi", content: "x", form: "long", title: "t", subroot: "b" }, "tok"),
     d,
   );
-  ok(r1.status === 400, "board long must 400, got " + r1.status);
+  ok(r1.status === 201, "board long must 201, got " + r1.status);
   const r2 = await handleApi(
+    req("POST", "/api/post", { identifier: "peanutoshi", content: "x", form: "short", subroot: "b" }, "tok"),
+    d,
+  );
+  ok(r2.status === 201, "board short must 201, got " + r2.status);
+  const r3 = await handleApi(
     req("POST", "/api/post", { identifier: "peanutoshi", content: "x", form: "short", subroot: "f" }, "tok"),
     d,
   );
-  ok(r2.status === 400, "forum short must 400, got " + r2.status);
+  ok(r3.status === 400, "forum short must 400, got " + r3.status);
 });
 
 Deno.test("v014: moderator may delete posts in their root", async () => {

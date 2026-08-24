@@ -961,6 +961,55 @@ export const LANDING_APP_JS = `
     postList(mount, list, 'cards');
   }
 
+  function viewMessages(mount) {
+    mount.appendChild(viewHeader('Messages'));
+    if (!S.me || !S.me.actor) {
+      mount.appendChild(el('div', 'empty', 'sign in to send direct messages'));
+      var si = el('a', 'goldbtn', 'Sign in'); si.href = '#/signin'; mount.appendChild(si);
+      return;
+    }
+    var box = el('div', 'panel');
+    var convo = el('div'); box.appendChild(convo);
+    var form = el('div', 'dmform');
+    var toIn = el('input', 'search'); toIn.placeholder = 'to (actor id)'; toIn.style.maxWidth = '200px';
+    var txtIn = el('input', 'search'); txtIn.placeholder = 'message'; txtIn.style.flex = '1';
+    var send = el('button', 'goldbtn sm', 'Send');
+    send.onclick = function () {
+      var to = toIn.value.trim().toLowerCase();
+      var content = txtIn.value.trim();
+      if (!to || !content) return;
+      api('/api/dm', 'POST', { identifier: S.me.actor, to: to, content: content }).then(function () {
+        txtIn.value = '';
+        render();
+      }).catch(function (e) {
+        convo.textContent = '';
+        convo.appendChild(el('div', 'empty', 'error: ' + (e && e.message ? e.message : 'send failed')));
+      });
+    };
+    form.appendChild(toIn); form.appendChild(txtIn); form.appendChild(send);
+    box.appendChild(form);
+    mount.appendChild(box);
+    function render() {
+      convo.textContent = '';
+      api('/api/dm?actor=' + encodeURIComponent(S.me.actor)).then(function (r) {
+        convo.appendChild(el('div', 'ptitle', r.count + ' message' + (r.count === 1 ? '' : 's')));
+        if (!r.count) { convo.appendChild(el('div', 'empty', 'no messages yet')); return; }
+        r.dms.forEach(function (dm) {
+          var row = el('div', 'nrow');
+          var mine = dm.from === S.me.actor;
+          row.appendChild(el('span', 'nicon', mine ? '\u{1F4E4}' : '\u{1F4E5}'));
+          var t = el('div', 'ntext');
+          t.appendChild(el('span', 'nwho', (mine ? 'to ' : 'from ') + (mine ? dm.to : dm.from)));
+          t.appendChild(el('div', null, dm.content));
+          row.appendChild(t);
+          row.appendChild(el('span', 'ntime', fmtTime(dm.sent)));
+          convo.appendChild(row);
+        });
+      });
+    }
+    render();
+  }
+
   function viewNotifications(mount) {
     mount.appendChild(viewHeader('Notifications'));
     if (!S.me || !S.me.actor) {
@@ -968,12 +1017,20 @@ export const LANDING_APP_JS = `
       var si = el('a', 'goldbtn', 'Sign in'); si.href = '#/signin'; mount.appendChild(si);
       return;
     }
-    if (S.notif.items.length === 0) { mount.appendChild(el('div', 'empty', 'nothing yet')); return; }
+    if (S.notif.items.length === 0) {
+      var emp = el('div', 'nempty');
+      emp.appendChild(el('div', null, '\u{1F515}'));
+      emp.appendChild(el('div', null, 'nothing yet \u2014 engage the network to get signals'));
+      mount.appendChild(emp);
+      return;
+    }
+    var acts = el('div', 'nactions');
     var mk = el('button', 'ghostbtn sm', 'Mark all read');
     mk.onclick = function () {
       api('/api/notifications/read', 'POST', { identifier: S.me.actor }).then(function () { loadNotifications().then(render); });
     };
-    mount.appendChild(mk);
+    acts.appendChild(mk);
+    mount.appendChild(acts);
     S.notif.items.forEach(function (n) {
       var r = el('div', 'nrow' + (n.read ? '' : ' unread'));
       var icon = { mention: '\u{1F4AC}', reply: '\u{1F4AC}', follow: '\u{1F517}', like: '\u2665', boost: '\u{1F501}' }[n.type] || '\u{1F514}';
@@ -1164,6 +1221,7 @@ export const LANDING_APP_JS = `
     rail.appendChild(navItem('#/roots', '\u{1F33F}', 'Roots'));
     rail.appendChild(navItem('#/tags', '#', 'Tags'));
     rail.appendChild(navItem('#/notifications', '\u{1F514}', 'Notifications', nbadge));
+  rail.appendChild(navItem('#/messages', '\u{1F4AC}', 'Messages'));
     rail.appendChild(navItem('#/settings', '\u2699\uFE0F', 'Settings'));
     rail.appendChild(navItem('#/docs', '\u{1F4D6}', 'Docs'));
     body.appendChild(rail);
@@ -1199,6 +1257,7 @@ export const LANDING_APP_JS = `
     else if (h === '#/forum') viewForum(main);
     else if (h === '#/tags') viewTags(main);
     else if (h === '#/notifications') viewNotifications(main);
+    else if (h === '#/messages') viewMessages(main);
     else if (h === '#/settings') viewSettings(main);
     else if (h === '#/docs') viewDocs(main);
     else if (h === '#/signin') viewSignin(main);

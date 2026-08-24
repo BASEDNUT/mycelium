@@ -37,13 +37,15 @@ const CSS = `
   --bg:#160D07;--panel:#241610;--panel2:#2C1B12;--gold:#E8B56E;--bark:#C8A27A;
   --cream:#FAF3E6;--muted:rgba(250,243,230,.56);--line:rgba(212,166,118,.16);
   --green:#8FBC6F;--danger:#E07856;--shadow:0 10px 30px rgba(0,0,0,.45);
-  --inputbg:rgba(250,243,230,.05)
+  --inputbg:rgba(250,243,230,.05);
+  --card:#241610;--text:#FAF3E6;--accent:#E8B56E;--dim:rgba(250,243,230,.56)
 }
 html[data-theme=light]{
   --bg:#FAF3E6;--panel:#FFFDF7;--panel2:#F3E9D6;--gold:#A9701F;--bark:#8A6238;
   --cream:#2B1D12;--muted:rgba(43,29,18,.58);--line:rgba(140,100,60,.18);
   --green:#4E7A2E;--danger:#B04A2A;--shadow:0 8px 24px rgba(120,80,40,.14);
-  --inputbg:#fff
+  --inputbg:#fff;
+  --card:#FFFDF7;--text:#2B1D12;--accent:#A9701F;--dim:rgba(43,29,18,.58)
 }
 html{scroll-behavior:smooth}
 body{background:var(--bg);color:var(--cream);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased;min-height:100vh}
@@ -242,7 +244,11 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .tc{color:var(--muted)}
 
 /* notifications */
-.nrow{display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:11px 14px;margin-bottom:6px;font-size:14px}
+.nrow{display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px;font-size:14px}
+.nrow.unread{border-color:var(--gold);background:color-mix(in srgb,var(--gold) 6%,var(--panel))}
+.nrow .nicon{flex:0 0 24px;text-align:center}
+.nactions{display:flex;justify-content:flex-end;margin:10px 0 14px}
+.nempty{display:flex;flex-direction:column;align-items:center;gap:12px;padding:48px 0;color:var(--muted)}
 .nrow.unread{border-color:var(--gold)}
 .nicon{font-size:16px}
 .ntext{flex:1;min-width:0;color:var(--muted)}
@@ -275,6 +281,7 @@ html[data-theme=light] .overlay{background:rgba(70,45,20,.3)}
 .creditline{text-align:center;color:var(--muted);font-size:12px;padding:10px 0 16px}
 
 /* empty */
+.dmform{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
 .empty{color:var(--muted);font-style:italic;padding:18px 0;font-size:14px}
 .main>.goldbtn,.main>.ghostbtn{width:max-content;justify-self:start}
 
