@@ -35,14 +35,14 @@ const CSS = `
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root,html[data-theme=dark]{
   --bg:#160D07;--panel:#241610;--panel2:#2C1B12;--gold:#E8B56E;--bark:#C8A27A;
-  --cream:#FAF3E6;--muted:rgba(250,243,230,.56);--line:rgba(212,166,118,.16);
+  --cream:#FAF3E6;--muted:rgba(250,243,230,.66);--line:rgba(212,166,118,.30);--t-body:15px;--t-title:16px;--t-meta:12px;--t-display:20px;
   --green:#8FBC6F;--danger:#E07856;--shadow:0 10px 30px rgba(0,0,0,.45);
   --inputbg:rgba(250,243,230,.05);
   --card:#241610;--text:#FAF3E6;--accent:#E8B56E;--dim:rgba(250,243,230,.56)
 }
 html[data-theme=light]{
   --bg:#FAF3E6;--panel:#FFFDF7;--panel2:#F3E9D6;--gold:#A9701F;--bark:#8A6238;
-  --cream:#2B1D12;--muted:rgba(43,29,18,.58);--line:rgba(140,100,60,.18);
+  --cream:#2B1D12;--muted:rgba(43,29,18,.66);--line:rgba(140,100,60,.24);--t-body:15px;--t-title:16px;--t-meta:12px;--t-display:20px;
   --green:#4E7A2E;--danger:#B04A2A;--shadow:0 8px 24px rgba(120,80,40,.14);
   --inputbg:#fff;
   --card:#FFFDF7;--text:#2B1D12;--accent:#A9701F;--dim:rgba(43,29,18,.58)
@@ -148,13 +148,13 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .pclass{font-size:11px;color:var(--bark);text-transform:uppercase;letter-spacing:.5px}
 .pdot,.ptime,.premote{color:var(--muted);font-size:12px}
 .premote{color:var(--green)}
-.pbody{margin:10px 0 8px;white-space:pre-wrap;word-wrap:break-word;color:var(--cream);line-height:1.55}
+.pbody{margin:10px 0 8px;white-space:pre-wrap;word-wrap:break-word;color:var(--cream);font-size:var(--t-body);line-height:1.55}
 .ptitle2{font-size:18px;margin-bottom:6px;color:var(--cream)}
 .tagchip{color:var(--gold);font-weight:600}
 .menchip{color:var(--bark);font-weight:600}
 .actions{display:flex;gap:6px;margin-top:6px;color:var(--muted);font-size:13px}
-.votebox{display:flex;flex-direction:column;align-items:center;margin-right:4px}
-.varrow{background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;line-height:1;padding:1px 4px}
+.votebox{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:40px;margin-right:8px}
+.varrow{background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;line-height:1;padding:6px 10px;border-radius:4px}.varrow:hover{background:color-mix(in srgb,var(--gold) 12%,transparent)}
 .varrow:hover{color:var(--gold,#d8a24a)}
 .varrow.did{color:var(--gold,#d8a24a);font-weight:700}
 .vscore{font-size:12px;font-weight:600;color:var(--text,#eee)}
@@ -198,10 +198,10 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 /* v0.14.0: subreddit-style forum */
 .frow{display:flex;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:10px}
 .frow:hover{border-color:var(--accent)}
-.fvote{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:32px}
+.fvote{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:40px;margin-right:6px}
 .fscore{font-size:13px;font-weight:700;color:var(--text)}
 .fmid{display:flex;flex-direction:column;gap:4px;min-width:0}
-.ftitle{font-size:15px;font-weight:600;color:var(--text);text-decoration:none}
+.ftitle{font-size:var(--t-title);font-weight:700;color:var(--text);text-decoration:none}
 .ftitle:hover{color:var(--accent)}
 .fmeta{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline;font-size:12px;color:var(--dim)}
 .fcomments{color:var(--accent);text-decoration:none;font-size:12px}
@@ -282,7 +282,9 @@ html[data-theme=light] .overlay{background:rgba(70,45,20,.3)}
 
 /* empty */
 .dmform{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
-.empty{color:var(--muted);font-style:italic;padding:18px 0;font-size:14px}
+.empty{color:var(--muted);font-style:normal;padding:56px 16px;font-size:15px;display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center}
+.pimg{width:100%;max-height:420px;object-fit:cover;border-radius:10px;margin-top:8px;border:1px solid var(--line)}
+.archchip{font-size:11px;text-transform:uppercase;letter-spacing:.6px;border:1px solid var(--line);border-radius:99px;padding:2px 8px;color:var(--muted)}
 .main>.goldbtn,.main>.ghostbtn{width:max-content;justify-self:start}
 
 /* mobile */
@@ -299,6 +301,7 @@ html[data-theme=light] .overlay{background:rgba(70,45,20,.3)}
   .fab{display:flex;position:fixed;right:18px;bottom:calc(70px + env(safe-area-inset-bottom));width:54px;height:54px;border-radius:50%;background:var(--gold);color:#241610;font-size:21px;align-items:center;justify-content:center;box-shadow:var(--shadow);z-index:61}
 }
 @media (max-width:560px){
+  .post,.frow,.bthread{border-radius:0;margin:0 0 1px;border-left:0;border-right:0}
   .wordmark{font-size:17px}
   .livepill{display:none}
   .search{font-size:13px;padding:6px 12px}

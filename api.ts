@@ -277,6 +277,15 @@ export async function handleApi(
     if (title != null && title.length > MAX_TITLE) {
       return json(400, { error: `title too long (max ${MAX_TITLE})` });
     }
+    // v0.16.0: optional image — https URL only, bounded length.
+    const MAX_IMAGE_URL = 2048;
+    let image: string | undefined;
+    if (body.image != null) {
+      image = String(body.image).trim();
+      if (!/^https:\/\//.test(image) || image.length > MAX_IMAGE_URL) {
+        return json(400, { error: `image must be an https URL (max ${MAX_IMAGE_URL})` });
+      }
+    }
     if (await deps.store.getActor(postingAs) == null) {
       return json(404, { error: "unknown actor" });
     }
@@ -335,6 +344,7 @@ export async function handleApi(
       form,
       title: title || undefined,
       subroot: subrootRaw,
+      image,
     };
     await deps.store.putPost(post);
 

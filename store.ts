@@ -63,6 +63,7 @@ export interface PostRecord {
   title?: string; // long-form title
   isRemote?: boolean; // true when ingested via federation
   subroot?: string; // optional subroot binding (v0.11.0); legacy posts have none
+  image?: string; // optional https image URL (v0.16.0)
 }
 
 export interface VoteRecord {
