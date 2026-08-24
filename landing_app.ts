@@ -727,7 +727,7 @@ export const LANDING_APP_JS = `
     return h % 100000;
   }
   function greenText(node, content) {
-    var lines = content.split('\n');
+    var lines = content.split('\\n');
     lines.forEach(function (ln, i) {
       if (i > 0) node.appendChild(document.createElement('br'));
       if (ln.charAt(0) === '>') {
