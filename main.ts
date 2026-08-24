@@ -32,6 +32,7 @@ import { buildNote, buildCreate, classifyVisibility } from "./notes.ts";
 import { NetworkProjection, migrateKg } from "./network.ts";
 import { handleNetwork } from "./network_api.ts";
 import { skillMd } from "./skill_md.ts";
+import { llmsTxt } from "./llms_txt.ts";
 import { assertFederatable } from "./ssrf.ts";
 import { landingHtml } from "./landing.ts";
 import { VERSION } from "./version.ts";
@@ -468,6 +469,13 @@ export default {
     if (url.pathname === "/skill.md") {
       return new Response(skillMd(origin, VERSION), {
         headers: { "content-type": "text/markdown; charset=utf-8" },
+      });
+    }
+
+    // v0.19.0: llms.txt convention endpoints for AI agents.
+    if (url.pathname === "/llms.txt" || url.pathname === "/agents.md") {
+      return new Response(llmsTxt(origin, VERSION), {
+        headers: { "content-type": "text/plain; charset=utf-8" },
       });
     }
 

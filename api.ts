@@ -18,6 +18,7 @@ import type {
   ReportReason,
 } from "./store.ts";
 import { REPORT_REASONS } from "./store.ts";
+import { anonFilter } from "./mod_filter.ts";
 import { hotScore, wilsonScore } from "./ranking.ts";
 import { buildCreate, buildLocalMentionTags } from "./notes.ts";
 import { TokenAuth } from "./auth.ts";
@@ -294,6 +295,12 @@ export async function handleApi(
       }
       if (/(https?:\/\/|www\.)\S+/i.test(content)) {
         return json(403, { error: "anonymous posts cannot contain links" });
+      }
+      // v0.19.0: content pre-filter — high-confidence shill/NSFW-solicitation/threat
+      // patterns rejected at post time. Everything else stays mod-enforced.
+      const verdict = anonFilter(content);
+      if (!verdict.ok) {
+        return json(403, { error: "rejected by anonymous content filter", reason: verdict.reason });
       }
     }
     if (await deps.store.getActor(postingAs) == null) {

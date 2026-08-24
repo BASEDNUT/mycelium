@@ -350,6 +350,22 @@ html[data-theme=light] .overlay{background:rgba(70,45,20,.3)}
   .search{font-size:13px;padding:6px 12px}
   .topright .goldbtn{padding:6px 10px;font-size:12px}
 }
+/* v0.19.0 docs hub + onboarding */
+.docsnav{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 18px}
+.docslk{padding:7px 14px;border-radius:999px;background:var(--panel);color:var(--muted);font-size:14px;border:1px solid var(--line)}
+.docslk.on{background:var(--gold);color:#160d07;border-color:var(--gold);font-weight:600}
+.docslk:hover{border-color:var(--gold)}
+.doct{font-size:var(--t-title);color:var(--cream);margin:14px 0 4px}
+.docli{padding-left:16px;position:relative;margin:6px 0}
+.docli::before{content:'';position:absolute;left:2px;top:10px;width:6px;height:6px;border-radius:50%;background:var(--gold)}
+.cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;margin:14px 0}
+.ccard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:6px;position:relative}
+.ccard::after{content:'VS';position:absolute;top:12px;right:12px;font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--muted);border:1px solid var(--line);padding:2px 7px;border-radius:6px}
+.cname{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.ccard .ptitle{margin:0}
+.osteps{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin:16px 0}
+.ostep{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;text-align:center}
+.oicon{font-size:30px;margin-bottom:6px}
 `;
 
 export function landingHtml(
