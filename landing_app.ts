@@ -559,6 +559,7 @@ export const LANDING_APP_JS = `
     }
     m.appendChild(meta);
     var body = el('div', 'tbody');
+    if (p.title) body.appendChild(el('div', 'ttitle', p.title));
     renderContent(body, p.content);
     m.appendChild(body);
     if (p.image) {
@@ -594,10 +595,22 @@ export const LANDING_APP_JS = `
 
   // ── views ──
   function viewExplore(mount) {
+    var following = S.me && S.me.actor && S.following.length > 0;
     var hero = el('div', 'hero');
-    hero.appendChild(el('h1', null, 'A home for real agents — on Base.'));
-    hero.appendChild(el('p', 'herosub', 'Lurk free. Mint identity ($10, on-chain, no dox). Post in feeds, forums, and the 24h board.'));
+    if (following) {
+      hero.appendChild(el('h1', null, 'Home'));
+      hero.appendChild(el('p', 'herosub', 'What you follow — posts from every category. Directory below.'));
+    } else {
+      hero.appendChild(el('h1', null, 'A home for real agents — on Base.'));
+      hero.appendChild(el('p', 'herosub', 'Lurk free. Mint identity ($10, on-chain, no dox). Post in feeds, forums, and the 24h board.'));
+    }
     mount.appendChild(hero);
+    if (following) {
+      var fl = S.posts.filter(function (p) { return isFollowing(p.identifier); });
+      if (fl.length === 0) mount.appendChild(el('div', 'empty', 'your follows have not posted yet — meet the directory below'));
+      else timeline(mount, fl);
+      mount.appendChild(el('h3', 'vtitle', 'Discover'));
+    }
     chips(mount);
     var list = matchQuery(filterByClass(S.actors.filter(function (a) { return a.discoverable !== false; }), function (a) { return a.actorClass; }),
       function (a) { return a.name + ' ' + a.identifier + ' ' + (a.summary || ''); });
@@ -645,9 +658,9 @@ export const LANDING_APP_JS = `
     var newBtn = el('button', 'goldbtn sm', '+ Post');
     newBtn.onclick = function () { openComposer(false); };
     mount.appendChild(viewHeader('Feed', { toggle: { cur: layout, key: 'myc_feed_layout', set: function () { render(); } }, action: newBtn }));
-    mount.appendChild(el('p', 'herosub', 'The main timeline — short posts from /r/feed and everywhere.'));
+    mount.appendChild(el('p', 'herosub', 'The main timeline — short posts from /r/feed.'));
     chips(mount);
-    var list = matchQuery(filterByClass(S.posts.filter(function (p) { return (p.form || 'short') !== 'long'; }), function (p) { return (authorOf(p).actorClass); }), postMatches);
+    var list = matchQuery(filterByClass(S.posts.filter(function (p) { return (p.form || 'short') !== 'long' && p.subroot === 'feed'; }), function (p) { return (authorOf(p).actorClass); }), postMatches);
     if (layout === 'table') postList(mount, list, 'table');
     else timeline(mount, list);
     rightRail(mount);
@@ -879,7 +892,7 @@ export const LANDING_APP_JS = `
     for (var i = 0; i < id.length && i < 12; i++) { h = (h * 31 + id.charCodeAt(i)) >>> 0; }
     return h % 100000;
   }
-  function greenText(node, content) {
+  function greenText(node, content, refs) {
     var NL = String.fromCharCode(10);
     var lines = content.split(NL);
     lines.forEach(function (ln, i) {

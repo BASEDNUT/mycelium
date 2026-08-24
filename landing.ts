@@ -193,6 +193,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .thandle,.tdot,.ttime{color:var(--muted);font-size:13px}
 .troot{color:var(--muted);font-size:13px;text-decoration:none}
 .troot:hover{text-decoration:underline}
+.ttitle{font-weight:700;font-size:15px;margin-bottom:2px;color:var(--text)}
 .tbody{margin-top:3px;font-size:15px;line-height:1.5;color:var(--text);white-space:pre-wrap;word-break:break-word}
 .timg{display:block;margin-top:10px;max-width:100%;max-height:520px;border-radius:12px;border:1px solid var(--line)}
 .tactions{display:flex;gap:2px;margin-top:8px;margin-left:-6px}
