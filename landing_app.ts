@@ -478,7 +478,12 @@ export const LANDING_APP_JS = `
     var prev = el('span', 'rowprev'); renderContent(prev, p.content.slice(0, 140));
     mid.appendChild(prev);
     r.appendChild(mid);
-    r.appendChild(el('span', 'rowmeta', fmtTime(p.published) + ' \u00B7 ' + (S.replies[p.id] || 0) + 'r'));
+    var bits = [];
+    if (p.subroot) bits.push('/r/' + p.subroot);
+    bits.push('@' + a.identifier);
+    bits.push(fmtTime(p.published));
+    bits.push((S.replies[p.id] || 0) + 'r');
+    r.appendChild(el('span', 'rowmeta', bits.join(' · ')));
     r.onclick = function () { location.hash = '#/topic/' + encodeURIComponent(p.id); };
     return r;
   }
@@ -505,6 +510,84 @@ export const LANDING_APP_JS = `
       var here = document.getElementById('main');
       if (!here || here.dataset.live !== '1') return;
       if (S.renderSeq !== seqAtRender) return; // stale: user switched tabs
+      render();
+    });
+  }
+
+  // ── v0.17.0: native Twitter-style timeline ──
+  function tweetActions(p) {
+    var bar = el('div', 'tactions');
+    var i = S.interactions[p.id];
+    var replies = S.replies[p.id] || 0;
+    var rB = el('button', 'tact', null); rB.title = 'Reply';
+    rB.appendChild(el('span', null, '💬'));
+    rB.appendChild(el('span', 'acount', String(replies)));
+    rB.onclick = function (e) { e.stopPropagation(); location.hash = '#/topic/' + encodeURIComponent(p.id); };
+    bar.appendChild(rB);
+    var bB = el('button', 'tact' + (myReact('boost', p.id) ? ' did' : ''), null); bB.title = 'Boost';
+    bB.appendChild(el('span', null, '🔁'));
+    bB.appendChild(el('span', 'acount', String(i ? i.boostCount : 0)));
+    bB.onclick = function (e) { e.stopPropagation(); toggleReact('boost', p.id); };
+    bar.appendChild(bB);
+    var lB = el('button', 'tact' + (myReact('like', p.id) ? ' did' : ''), null); lB.title = 'Like';
+    lB.appendChild(el('span', null, '♥'));
+    lB.appendChild(el('span', 'acount', String(i ? i.likeCount : 0)));
+    lB.onclick = function (e) { e.stopPropagation(); toggleReact('like', p.id); };
+    bar.appendChild(lB);
+
+    return bar;
+  }
+  function tweetRow(p) {
+    var a = authorOf(p);
+    var r = el('article', 'trow');
+    r.appendChild(el('span', 'pava', avatar(a.actorClass)));
+    var m = el('div', 'tmain');
+    var meta = el('div', 'tmeta');
+    var nm = el('a', 'tname', a.name);
+    nm.href = '#/actor/' + encodeURIComponent(p.identifier);
+    nm.onclick = function (e) { e.stopPropagation(); };
+    meta.appendChild(nm);
+    meta.appendChild(el('span', 'thandle', '@' + a.identifier));
+    meta.appendChild(el('span', 'tdot', '·'));
+    meta.appendChild(el('span', 'ttime', fmtTime(p.published)));
+    if (p.subroot) {
+      meta.appendChild(el('span', 'tdot', '·'));
+      var rp = el('a', 'troot', '/r/' + p.subroot);
+      rp.href = '#/r/' + encodeURIComponent(p.subroot);
+      rp.onclick = function (e) { e.stopPropagation(); };
+      meta.appendChild(rp);
+    }
+    m.appendChild(meta);
+    var body = el('div', 'tbody');
+    renderContent(body, p.content);
+    m.appendChild(body);
+    if (p.image) {
+      var im = el('img', 'timg');
+      im.src = p.image; im.alt = 'post image';
+      im.loading = 'lazy'; im.referrerPolicy = 'no-referrer';
+      m.appendChild(im);
+    }
+    m.appendChild(tweetActions(p));
+    r.appendChild(m);
+    r.onclick = function () { location.hash = '#/topic/' + encodeURIComponent(p.id); };
+    return r;
+  }
+  function timeline(mount, list) {
+    if (list.length === 0) {
+      var em = el('div', 'empty');
+      em.appendChild(el('div', null, '🌱'));
+      em.appendChild(el('div', null, 'nothing here yet — plant the first seed'));
+      mount.appendChild(em); return;
+    }
+    var box = el('div', 'timeline');
+    list.forEach(function (p) { box.appendChild(tweetRow(p)); });
+    mount.appendChild(box);
+    var seqAtRender = S.renderSeq;
+    fetchInteractions(list.map(function (p) { return p.id; })).then(function (fetched) {
+      if (fetched === 0) return;
+      var here = document.getElementById('main');
+      if (!here || here.dataset.live !== '1') return;
+      if (S.renderSeq !== seqAtRender) return;
       render();
     });
   }
@@ -565,24 +648,69 @@ export const LANDING_APP_JS = `
     mount.appendChild(el('p', 'herosub', 'The main timeline — short posts from /r/feed and everywhere.'));
     chips(mount);
     var list = matchQuery(filterByClass(S.posts.filter(function (p) { return (p.form || 'short') !== 'long'; }), function (p) { return (authorOf(p).actorClass); }), postMatches);
-    postList(mount, list, layout);
+    if (layout === 'table') postList(mount, list, 'table');
+    else timeline(mount, list);
     rightRail(mount);
   }
 
   function viewForum(mount) {
-    var layout = localStorage.getItem('myc_forum_layout') || S.layout;
     var newBtn = el('button', 'goldbtn sm', '+ New topic');
     newBtn.onclick = function () { openComposer(true); };
-    mount.appendChild(viewHeader('Forum', { toggle: { cur: layout, key: 'myc_forum_layout', set: function () { render(); } }, action: newBtn }));
+    mount.appendChild(viewHeader('Forum', { action: newBtn }));
     mount.appendChild(el('p', 'herosub', 'Long-form topics across all community roots.'));
     var list = matchQuery(S.posts.filter(function (p) { return p.form === 'long'; }), postMatches);
-    postList(mount, list, layout === 'cards' ? 'table' : layout);
+    forumList(mount, list);
   }
 
   function viewTopic(mount, id) {
     var p = null;
     S.posts.forEach(function (x) { if (x.id === id) p = x; });
     if (!p) { mount.appendChild(el('div', 'empty', 'post not found')); return; }
+    var srB = p.subroot ? subrootOf(p.subroot) : null;
+    if (srB && srB.archetype === 'board') {
+      var backB = el('a', 'backlink', '← Back');
+      backB.href = '#/r/' + encodeURIComponent(p.subroot);
+      mount.appendChild(backB);
+      var refsB = {};
+      S.posts.forEach(function (q) { refsB[String(shortNo(q.id))] = q.id; });
+      mount.appendChild(boardPost(p, { slug: p.subroot, refs: refsB }));
+      var breps = S.posts.filter(function (q) {
+        return q.inReplyTo && (q.inReplyTo.indexOf(p.id) !== -1 || q.inReplyTo.indexOf('/p/' + p.id) !== -1);
+      }).sort(function (a2, b2) { return a2.published.localeCompare(b2.published); });
+      var rcB = el('div', 'breplies');
+      breps.forEach(function (r2) { rcB.appendChild(boardPost(r2, { refs: refsB })); });
+      mount.appendChild(rcB);
+      var bb = el('div', 'replybox');
+      var bta = el('textarea', 'ctext');
+      bta.maxLength = 5000;
+      bta.placeholder = (S.me && S.me.actor) ? ('Reply as @' + S.me.actor + '…') : 'Anonymous reply — no links, gone in 24h';
+      var bgo = el('button', 'goldbtn', 'Reply');
+      bgo.onclick = function () {
+        var c = bta.value.trim();
+        if (!c) { toast('empty reply'); return; }
+        var bodyB = { content: c, form: 'short', subroot: p.subroot, inReplyTo: p.id };
+        if (S.me && S.me.actor) bodyB.identifier = S.me.actor;
+        else { bodyB.anonymous = true; bodyB.identifier = ''; }
+        api('/api/post', 'POST', bodyB).then(function (j) {
+          if (j._status === 201) {
+            toast('replied');
+            return api('/api/feed?limit=200').then(function (f2) {
+              if (f2._status === 200) { S.posts = f2.posts || S.posts; buildTagIndex(); buildReplies(); }
+              render();
+            });
+          }
+          toast(j.error || 'reply failed');
+        }).catch(function () { toast('network error'); });
+      };
+      bb.appendChild(bta); bb.appendChild(bgo);
+      mount.appendChild(bb);
+      var seqB = S.renderSeq;
+      fetchInteractions([p.id]).then(function (fB) {
+        if (fB === 0 || S.renderSeq !== seqB) return;
+        render();
+      });
+      return;
+    }
     var back = el('a', 'backlink', '\u2190 Back'); back.href = '#/feed'; mount.appendChild(back);
     mount.appendChild(postCard(p, { detail: true }));
     var replies = S.posts.filter(function (x) { return x.inReplyTo === id; })
@@ -741,6 +869,7 @@ export const LANDING_APP_JS = `
     else list = S.posts.filter(function (p) { return p.subroot === slug; });
     if (isBoard) boardList(mount, list, slug);
     else if (sr.archetype === 'forum') forumList(mount, list);
+    else if (sr.archetype === 'feed') timeline(mount, list);
     else postList(mount, list, 'cards');
   }
 
@@ -751,60 +880,88 @@ export const LANDING_APP_JS = `
     return h % 100000;
   }
   function greenText(node, content) {
-    var lines = content.split('\\n');
+    var NL = String.fromCharCode(10);
+    var lines = content.split(NL);
     lines.forEach(function (ln, i) {
       if (i > 0) node.appendChild(document.createElement('br'));
       if (ln.charAt(0) === '>') {
-        var g = el('span', 'greentext', ln);
+        var g = el('span', 'greentext', null);
+        renderQuoteRefs(g, ln, refs);
         node.appendChild(g);
       } else {
-        var t = el('span', null, ln);
+        var t = el('span', null, null);
+        renderQuoteRefs(t, ln, refs);
         node.appendChild(t);
       }
     });
   }
+  function renderQuoteRefs(node, line, refs) {
+    var re = new RegExp('>>([0-9]{1,6})', 'g');
+    var last = 0;
+    var m = re.exec(line);
+    while (m !== null) {
+      if (m.index > last) node.appendChild(document.createTextNode(line.slice(last, m.index)));
+      var pid = refs ? refs[m[1]] : null;
+      if (pid) {
+        var q = el('a', 'bqref', '>>' + m[1]);
+        q.href = '#/topic/' + encodeURIComponent(pid);
+        q.onclick = function (e) { e.stopPropagation(); };
+        node.appendChild(q);
+      } else {
+        node.appendChild(document.createTextNode(m[0]));
+      }
+      last = m.index + m[0].length;
+      m = re.exec(line);
+    }
+    if (last < line.length) node.appendChild(document.createTextNode(line.slice(last)));
+  }
   function boardPost(p, opts) {
     opts = opts || {};
     var isOP = !p.inReplyTo;
-    var d = el('div', isOP ? 'bop' : 'breply');
-    if (isOP) d.classList.add('bthread');
+    var d = el('div', isOP ? 'bpost op' : 'bpost');
     var intro = el('div', 'bintro');
     if (p.title) intro.appendChild(el('span', 'bsubject', p.title));
     var nm = p.identifier === 'anonymous' ? 'Anonymous' : '@' + p.identifier;
     intro.appendChild(el('span', 'bname', nm));
-    var t = el('span', 'btime', fmtTime(p.published));
-    intro.appendChild(t);
-    var no = el('span', 'bno', 'No.' + shortNo(p.id));
-    intro.appendChild(no);
+    intro.appendChild(el('span', 'btime', fmtTime(p.published)));
+    intro.appendChild(el('span', 'bno', 'No.' + shortNo(p.id)));
     d.appendChild(intro);
+    if (p.image) {
+      var th = el('img', 'bthumb');
+      th.src = p.image; th.alt = 'post image';
+      th.loading = 'lazy'; th.referrerPolicy = 'no-referrer';
+      d.appendChild(th);
+    }
     var body = el('div', 'bbody');
-    greenText(body, p.content);
+    greenText(body, p.content, opts.refs);
     d.appendChild(body);
-    if (isOP) {
-      var rep = el('button', 'breplybtn', 'Reply');
-      rep.onclick = function () { openBoardReply(p.id, opts.slug); };
-      d.appendChild(rep);
+    if (isOP && opts.slug) {
+      var repb = el('button', 'breplybtn', 'Reply');
+      repb.onclick = function () { openBoardReply(p.id, opts.slug); };
+      d.appendChild(repb);
     }
     return d;
   }
   function openBoardReply(parentId, slug) {
-    if (!S.me || !S.me.actor) { toast('sign in to reply, or post a new thread'); return; }
+    var asAnon = !(S.me && S.me.actor);
     var ov = el('div', 'overlay');
     var box = el('div', 'cbox');
     var h = el('div', 'chead');
-    h.appendChild(el('span', 'ctitle', 'Reply to No.' + shortNo(parentId)));
-    var x = el('button', 'iconbtn', '\u2715'); x.onclick = function () { ov.remove(); };
+    h.appendChild(el('span', 'ctitle', (asAnon ? 'Anonymous reply to ' : 'Reply to ') + 'No.' + shortNo(parentId)));
+    var x = el('button', 'iconbtn', '✕'); x.onclick = function () { ov.remove(); };
     h.appendChild(x); box.appendChild(h);
-    var ta = el('textarea', 'ctext'); ta.placeholder = 'Reply...'; ta.maxLength = 5000;
+    var ta = el('textarea', 'ctext');
+    ta.placeholder = asAnon ? 'Anonymous reply — no links, gone in 24h' : 'Reply…';
+    ta.maxLength = 5000;
     box.appendChild(ta);
     var go = el('button', 'goldbtn', 'Reply');
     go.onclick = function () {
       var c = ta.value.trim();
       if (!c) { toast('empty'); return; }
-      api('/api/post', 'POST', {
-        identifier: S.me.actor, content: c, form: 'short',
-        subroot: slug, inReplyTo: parentId,
-      }).then(function (j) {
+      var body = { content: c, form: 'short', subroot: slug, inReplyTo: parentId };
+      if (asAnon) { body.anonymous = true; body.identifier = ''; }
+      else body.identifier = S.me.actor;
+      api('/api/post', 'POST', body).then(function (j) {
         if (j._status === 201) {
           ov.remove(); toast('reply posted');
           return api('/api/feed?limit=200').then(function (f2) {
@@ -821,49 +978,71 @@ export const LANDING_APP_JS = `
   function boardList(mount, list, slug) {
     var threads = list.filter(function (p) { return !p.inReplyTo; });
     threads.sort(function (x, y) { return y.published.localeCompare(x.published); });
-    if (threads.length === 0) { mount.appendChild(el('div', 'empty', 'no threads yet \u2014 start one above')); return; }
-    threads.forEach(function (op) {
-      mount.appendChild(boardPost(op, { slug: slug }));
+    if (threads.length === 0) { mount.appendChild(el('div', 'empty', 'no threads yet — start one above')); return; }
+    var refs = {};
+    list.forEach(function (p) { refs[String(shortNo(p.id))] = p.id; });
+    threads.forEach(function (op, ti) {
+      if (ti > 0) mount.appendChild(el('div', 'bdivider'));
+      mount.appendChild(boardPost(op, { slug: slug, refs: refs }));
       var replies = list.filter(function (p) {
         return p.inReplyTo && (p.inReplyTo.indexOf(op.id) !== -1 || p.inReplyTo.indexOf('/p/' + op.id) !== -1);
       });
       replies.sort(function (x, y) { return x.published.localeCompare(y.published); });
       var rc = el('div', 'breplies');
-      replies.slice(0, 8).forEach(function (r) { rc.appendChild(boardPost(r)); });
+      replies.slice(0, 8).forEach(function (r) { rc.appendChild(boardPost(r, { refs: refs })); });
+      if (replies.length > 8) rc.appendChild(el('div', 'bomitted', (replies.length - 8) + ' replies omitted'));
       mount.appendChild(rc);
     });
   }
-
   // ── v0.14.0: subreddit-style forum renderer (vote column + topic rows) ──
   function forumRow(p) {
     var a = authorOf(p);
     var r = el('div', 'frow');
     var vc = el('div', 'fvote');
     if (!votesOn(p)) vc.style.visibility = 'hidden';
-    var up = el('button', 'varrow', '\u25B2');
+    var up = el('button', 'varrow', '▲');
     var sc = el('div', 'fscore', String(S.interactions[p.id] && S.interactions[p.id].score != null ? S.interactions[p.id].score : 0));
-    var dn = el('button', 'varrow', '\u25BC');
-    up.onclick = function () { toggleVote(1, p.id); };
-    dn.onclick = function () { toggleVote(-1, p.id); };
+    var dn = el('button', 'varrow', '▼');
+    up.onclick = function (e) { e.stopPropagation(); toggleVote(1, p.id); };
+    dn.onclick = function (e) { e.stopPropagation(); toggleVote(-1, p.id); };
     vc.appendChild(up); vc.appendChild(sc); vc.appendChild(dn);
     r.appendChild(vc);
     var mid = el('div', 'fmid');
     var tt = el('a', 'ftitle', p.title || '(untitled)');
     tt.href = '#/topic/' + encodeURIComponent(p.id);
+    tt.onclick = function (e) { e.stopPropagation(); };
     mid.appendChild(tt);
     var meta = el('div', 'fmeta');
-    meta.appendChild(el('span', 'fby', 'by @' + a.identifier));
-    meta.appendChild(el('span', 'fdot', '\u00B7'));
+    if (p.subroot) {
+      var srLink = el('a', 'fcommunity', '/r/' + p.subroot);
+      srLink.href = '#/r/' + encodeURIComponent(p.subroot);
+      srLink.onclick = function (e) { e.stopPropagation(); };
+      meta.appendChild(srLink);
+      meta.appendChild(el('span', 'fdot', '·'));
+    }
+    meta.appendChild(el('span', 'fby', '@' + a.identifier));
+    meta.appendChild(el('span', 'fdot', '·'));
     meta.appendChild(el('span', 'ftime', fmtTime(p.published)));
     var nreplies = S.posts.filter(function (q) {
       return q.inReplyTo && (q.inReplyTo.indexOf(p.id) !== -1 || q.inReplyTo.indexOf('/p/' + p.id) !== -1);
     }).length;
     var cm = el('a', 'fcomments', nreplies + ' comments');
     cm.href = '#/topic/' + encodeURIComponent(p.id);
-    meta.appendChild(el('span', 'fdot', '\u00B7'));
+    cm.onclick = function (e) { e.stopPropagation(); };
+    meta.appendChild(el('span', 'fdot', '·'));
     meta.appendChild(cm);
     mid.appendChild(meta);
+    var prev = el('div', 'fpreview');
+    renderContent(prev, p.content.slice(0, 200));
+    mid.appendChild(prev);
     r.appendChild(mid);
+    if (p.image) {
+      var th = el('img', 'fthumb');
+      th.src = p.image; th.alt = 'topic image';
+      th.loading = 'lazy'; th.referrerPolicy = 'no-referrer';
+      r.appendChild(th);
+    }
+    r.onclick = function () { location.hash = '#/topic/' + encodeURIComponent(p.id); };
     return r;
   }
   function forumList(mount, list) {
@@ -873,13 +1052,22 @@ export const LANDING_APP_JS = `
       var sy = (S.interactions[y.id] && S.interactions[y.id].score) || 0;
       return sy - sx || y.published.localeCompare(x.published);
     });
-    topics.forEach(function (p) { mount.appendChild(forumRow(p)); });
-    if (!topics.length) mount.appendChild(el('div', 'empty', 'no topics yet — be the first to plant one'));
+    if (!topics.length) { mount.appendChild(el('div', 'empty', 'no topics yet — be the first to plant one')); return; }
+    var box = el('div', 'flist');
+    topics.forEach(function (p) { box.appendChild(forumRow(p)); });
+    mount.appendChild(box);
+    var seqAtRender = S.renderSeq;
+    fetchInteractions(topics.map(function (p) { return p.id; })).then(function (fetched) {
+      if (fetched === 0) return;
+      var here = document.getElementById('main');
+      if (!here || here.dataset.live !== '1') return;
+      if (S.renderSeq !== seqAtRender) return;
+      render();
+    });
   }
-
   function anonComposer(slug) {
     var box = el('div', 'card anonbox');
-    box.appendChild(el('div', 'anonhint', 'No account needed. Posting as Anonymous — gone in 24h.'));
+    box.appendChild(el('div', 'anonhint', 'No account needed. Posting as Anonymous — gone in 24h. Rules: no links, no images, no NSFW, no shilling, nothing illegal or violent, no stolen content.'));
     var ta = el('textarea', 'ctext'); ta.placeholder = 'Speak into the void…'; ta.maxLength = 5000;
     var go = el('button', 'goldbtn', 'Post anonymously');
     go.onclick = function () {
@@ -1064,7 +1252,8 @@ export const LANDING_APP_JS = `
       var icon = { mention: '\u{1F4AC}', reply: '\u{1F4AC}', follow: '\u{1F517}', like: '\u2665', boost: '\u{1F501}' }[n.type] || '\u{1F514}';
       r.appendChild(el('span', 'nicon', icon));
       var txt = el('div', 'ntext');
-      var who = n.fromActorId.indexOf('/') >= 0 ? n.fromActorId.split('/').pop() : n.fromActorId;
+      var fid = n.fromActorId || 'unknown';
+      var who = fid.indexOf('/') >= 0 ? fid.split('/').pop() : fid;
       txt.appendChild(el('span', 'nwho', who));
       txt.appendChild(el('span', null, ' ' + n.type + (n.postId ? ' \u00B7 post' : '')));
       r.appendChild(txt);
@@ -1092,7 +1281,7 @@ export const LANDING_APP_JS = `
     var lrow = el('div', 'setrow');
     lrow.appendChild(el('span', 'slabel', 'Default layout'));
     var seg2 = el('div', 'seg');
-    var c1 = el('button', 'segbtn' + (S.layout === 'cards' ? ' on' : ''), 'Cards');
+    var c1 = el('button', 'segbtn' + (S.layout === 'cards' ? ' on' : ''), 'Timeline');
     var c2 = el('button', 'segbtn' + (S.layout === 'table' ? ' on' : ''), 'Table');
     c1.onclick = function () { S.layout = 'cards'; localStorage.setItem('myc_layout', 'cards'); render(); };
     c2.onclick = function () { S.layout = 'table'; localStorage.setItem('myc_layout', 'table'); render(); };
@@ -1292,7 +1481,7 @@ export const LANDING_APP_JS = `
     else viewExplore(main);
     } catch (e) {
       var card = el('div', 'card');
-      card.appendChild(el('h3', null, 'View error'));
+      card.appendChild(el('h3', null, 'View error (' + h + ')'));
       card.appendChild(el('p', null, String(e && e.message ? e.message : e)));
       card.appendChild(el('p', 'dim', 'Hard-refresh (Ctrl+Shift+R) once. If it persists, report this text.'));
       main.appendChild(card);

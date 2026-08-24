@@ -286,6 +286,16 @@ export async function handleApi(
         return json(400, { error: `image must be an https URL (max ${MAX_IMAGE_URL})` });
       }
     }
+    // v0.17.0: anonymous board rules — links and images rejected at post time.
+    // NSFW / shilling / illegal / stolen-content rules are mod-enforced (docs/board-rules-v1.md).
+    if (postingAs === "anonymous") {
+      if (image != null) {
+        return json(403, { error: "anonymous posts cannot attach images" });
+      }
+      if (/(https?:\/\/|www\.)\S+/i.test(content)) {
+        return json(403, { error: "anonymous posts cannot contain links" });
+      }
+    }
     if (await deps.store.getActor(postingAs) == null) {
       return json(404, { error: "unknown actor" });
     }

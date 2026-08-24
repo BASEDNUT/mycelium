@@ -182,21 +182,50 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .anonhint{font-size:12px;color:var(--muted)}
 .mrow{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
 .mrow label{font-size:12px;color:var(--muted)}
+/* v0.17.0: native surfaces — twitter timeline, reddit rows */
+.timeline{display:flex;flex-direction:column;border-top:1px solid var(--line)}
+.trow{display:flex;gap:12px;padding:12px 4px;border-bottom:1px solid var(--line);cursor:pointer}
+.trow:hover{background:color-mix(in srgb,var(--card) 60%,transparent)}
+.tmain{flex:1;min-width:0}
+.tmeta{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:14px;line-height:1.3}
+.tname{font-weight:700;color:var(--text);text-decoration:none}
+.tname:hover{text-decoration:underline}
+.thandle,.tdot,.ttime{color:var(--muted);font-size:13px}
+.troot{color:var(--muted);font-size:13px;text-decoration:none}
+.troot:hover{text-decoration:underline}
+.tbody{margin-top:3px;font-size:15px;line-height:1.5;color:var(--text);white-space:pre-wrap;word-break:break-word}
+.timg{display:block;margin-top:10px;max-width:100%;max-height:520px;border-radius:12px;border:1px solid var(--line)}
+.tactions{display:flex;gap:2px;margin-top:8px;margin-left:-6px}
+.tact{display:flex;align-items:center;gap:6px;background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:6px 14px;border-radius:999px}
+.tact:hover{background:color-mix(in srgb,var(--gold) 10%,transparent);color:var(--gold,#d8a24a)}
+.tact.did{color:var(--gold,#d8a24a)}
+.flist{display:flex;flex-direction:column;border-top:1px solid var(--line)}
+.fpreview{font-size:13px;color:var(--muted);line-height:1.4;overflow:hidden;max-height:2.9em}
+.fthumb{width:92px;height:62px;object-fit:cover;border:1px solid var(--line);border-radius:4px;align-self:center;flex:none}
+.fcommunity{color:var(--accent);font-weight:600;text-decoration:none;font-size:12px}
+.fcommunity:hover{text-decoration:underline}
+
 @media(max-width:720px){.rhero{padding:14px}.rheroacts{width:100%}}
 /* v0.14.0: 4chan-style board */
-.bthread{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:0 0 14px}
+.bpost{background:var(--card);border:1px solid var(--line);border-radius:0;padding:4px 8px;margin:0 0 2px;font-size:13px;overflow:auto}
+.bpost.op{padding:8px 10px}
+.bdivider{border-top:1px dashed var(--line);margin:10px 0}
+.bthumb{float:left;margin:4px 12px 2px 0;max-width:140px;max-height:140px;border:1px solid var(--line)}
+.bqref{color:#6b8fd4;text-decoration:none;font-weight:600}
+.bqref:hover{text-decoration:underline}
+.bomitted{font-size:11px;color:var(--dim);font-style:italic;padding:2px 0 4px}
 .bintro{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;font-size:12px;color:var(--dim)}
-.bsubject{font-weight:700;color:var(--text);font-size:14px}
-.bname{color:var(--accent);font-weight:600}
+.bsubject{font-weight:700;color:#e07b39;font-size:14px}
+.bname{color:#789922;font-weight:700}
 .btime{color:var(--dim)}
 .bno{color:var(--dim);cursor:pointer}
-.bbody{margin-top:6px;font-size:14px;line-height:1.5;color:var(--text);white-space:pre-wrap;word-break:break-word}
+.bbody{margin-top:4px;font-size:13px;line-height:1.45;color:var(--text);white-space:pre-wrap;word-break:break-word}
 .greentext{color:#789922}
 .breplybtn{margin-top:8px;background:none;border:1px solid var(--line);color:var(--accent);border-radius:6px;padding:2px 10px;font-size:12px;cursor:pointer}
 .breplybtn:hover{border-color:var(--accent)}
-.breplies{margin:-6px 0 14px 26px;border-left:2px solid var(--line);padding-left:12px}
+.breplies{margin:0 0 6px 18px;border-left:2px solid var(--line);padding-left:8px}
 /* v0.14.0: subreddit-style forum */
-.frow{display:flex;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:10px}
+.frow{display:flex;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:0;padding:8px 10px;margin:0}
 .frow:hover{border-color:var(--accent)}
 .fvote{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:40px;margin-right:6px}
 .fscore{font-size:13px;font-weight:700;color:var(--text)}
@@ -301,7 +330,7 @@ html[data-theme=light] .overlay{background:rgba(70,45,20,.3)}
   .fab{display:flex;position:fixed;right:18px;bottom:calc(70px + env(safe-area-inset-bottom));width:54px;height:54px;border-radius:50%;background:var(--gold);color:#241610;font-size:21px;align-items:center;justify-content:center;box-shadow:var(--shadow);z-index:61}
 }
 @media (max-width:560px){
-  .post,.frow,.bthread{border-radius:0;margin:0 0 1px;border-left:0;border-right:0}
+  .post,.frow,.bpost,.trow{border-radius:0;margin:0 0 1px;border-left:0;border-right:0}
   .wordmark{font-size:17px}
   .livepill{display:none}
   .search{font-size:13px;padding:6px 12px}
