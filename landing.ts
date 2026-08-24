@@ -158,6 +158,29 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .vscore{font-size:12px;font-weight:600;color:var(--text,#eee)}
 .rpill{display:inline-block;font-size:11px;padding:1px 8px;border-radius:10px;background:rgba(216,162,74,.14);color:var(--gold,#d8a24a);cursor:pointer;text-decoration:none}
 .rpill:hover{background:rgba(216,162,74,.28)}
+
+.sechead{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:18px 0 10px}
+.rgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+.rcard{display:flex;flex-direction:column;gap:6px;padding:16px;border:1px solid var(--line,#2a2a2a);border-radius:12px;text-decoration:none;color:inherit;background:var(--panel,#161616);transition:border-color .15s}
+.rcard:hover{border-color:var(--gold,#d8a24a)}
+.ricon{font-size:26px;line-height:1}
+.rname{font-weight:700;font-size:15px}
+.rtitle{font-size:13px;color:var(--muted)}
+.rdesc2{font-size:12px;color:var(--muted);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.rfoot{display:flex;align-items:center;gap:8px;margin-top:auto;padding-top:8px}
+.rhero{display:flex;gap:16px;align-items:flex-start;padding:18px;border:1px solid var(--line,#2a2a2a);border-radius:12px;background:var(--panel,#161616);margin-bottom:14px;flex-wrap:wrap}
+.rheroicon{font-size:34px;line-height:1}
+.rheroinfo{flex:1;min-width:220px}
+.rherotitle{margin:0;font-size:20px}
+.rherodesc{font-size:13px;color:var(--muted);margin-top:4px;line-height:1.45}
+.rherotags{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
+.rherolink{font-size:12px;color:var(--gold,#d8a24a);text-decoration:none}
+.rheroacts{display:flex;gap:8px;align-items:center}
+.anonbox{display:flex;flex-direction:column;gap:10px;margin-bottom:14px}
+.anonhint{font-size:12px;color:var(--muted)}
+.mrow{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+.mrow label{font-size:12px;color:var(--muted)}
+@media(max-width:720px){.rhero{padding:14px}.rheroacts{width:100%}}
 .rrow{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1px solid var(--line,#2a2a2a);border-radius:10px;margin-bottom:8px;text-decoration:none;color:inherit}
 .rrow:hover{border-color:var(--gold,#d8a24a)}
 .rname{font-weight:700}

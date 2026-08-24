@@ -30,6 +30,8 @@ export interface SubrootRecord {
   archetype: SubrootArchetype;
   title: string;
   description: string;
+  icon: string; // emoji or short glyph (v0.13.0)
+  url: string; // external link, optional (v0.13.0)
   config: SubrootConfig;
   creator: string; // actor identifier (system seeds use "__instance__")
   created: string;
@@ -214,6 +216,28 @@ export class MyceliumStore {
       const e of this.kv.list<SubrootRecord>({ prefix: [...NS, "subroot"] })
     ) out.push(e.value);
     return out;
+  }
+
+  /**
+   * v0.13.0: creator-managed update. Only title/description/icon/url/config
+   * are editable; slug, archetype, creator, created are immutable here.
+   */
+  async updateSubroot(
+    slug: string,
+    patch: Partial<Pick<SubrootRecord, "title" | "description" | "icon" | "url" | "config">>,
+  ): Promise<SubrootRecord | null> {
+    const cur = await this.getSubroot(slug);
+    if (cur == null) return null;
+    const next: SubrootRecord = {
+      ...cur,
+      ...(patch.title != null ? { title: patch.title } : {}),
+      ...(patch.description != null ? { description: patch.description } : {}),
+      ...(patch.icon != null ? { icon: patch.icon } : {}),
+      ...(patch.url != null ? { url: patch.url } : {}),
+      ...(patch.config != null ? { config: patch.config } : {}),
+    };
+    await this.putSubroot(next);
+    return next;
   }
 
   async deleteSubroot(slug: string): Promise<void> {

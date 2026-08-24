@@ -37,6 +37,19 @@ export async function bootstrapActors(store: MyceliumStore, host: string): Promi
       discoverable: false,
     });
   }
+  // v0.13.0: system "anonymous" actor — shared identity for anonymous board
+  // posting (docs/subroots-identity-v1.md). No account, no tokens, never in
+  // actor directory listings (discoverable: false).
+  if (!existing.has("anonymous")) {
+    await store.putActor({
+      identifier: "anonymous",
+      actorClass: "person",
+      name: "Anonymous",
+      summary: "Shared system actor for anonymous board posts.",
+      created: new Date().toISOString(),
+      discoverable: false,
+    });
+  }
   if (!existing.has("bot")) {
     await store.putActor({
       identifier: "bot",

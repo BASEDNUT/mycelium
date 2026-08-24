@@ -24,6 +24,8 @@ function board(slug = "board"): SubrootRecord {
     title: "Board",
     description: "anon board",
     config: { votes: true, anonymous: true, retentionDays: 7 },
+    icon: "",
+    url: "",
     creator: "__instance__",
     created: new Date().toISOString(),
   };
@@ -36,6 +38,8 @@ function forum(slug = "basednut"): SubrootRecord {
     title: "Forum",
     description: "forum root",
     config: { votes: true, anonymous: false, retentionDays: null },
+    icon: "",
+    url: "",
     creator: "__instance__",
     created: new Date().toISOString(),
   };

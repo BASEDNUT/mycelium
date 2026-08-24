@@ -225,7 +225,7 @@ export const LANDING_APP_JS = `
       }).catch(function () { toast('network error'); });
   }
   var composerOpen = false;
-  function openComposer(long) {
+  function openComposer(long, presetSub) {
     if (!S.me || !S.me.actor) { location.hash = '#/signin'; return; }
     composerOpen = true;
     var ov = el('div', 'overlay'); ov.id = 'composer';
@@ -246,7 +246,8 @@ export const LANDING_APP_JS = `
       var o = el('option', null, '/r/' + sr.slug + ' · ' + sr.title); o.value = sr.slug;
       sel.appendChild(o);
     });
-    if (S.view.indexOf('#/r/') === 0) sel.value = S.view.slice(4);
+    if (presetSub) sel.value = presetSub;
+    else if (S.view.indexOf('#/r/') === 0) sel.value = S.view.slice(4);
     box.appendChild(sel);
     var ta = el('textarea', 'ctext'); ta.placeholder = long ? 'Topic body…' : 'What is taking root?';
     ta.maxLength = 5000; ta.id = 'cbody'; box.appendChild(ta);
@@ -537,6 +538,7 @@ export const LANDING_APP_JS = `
     var newBtn = el('button', 'goldbtn sm', '+ Post');
     newBtn.onclick = function () { openComposer(false); };
     mount.appendChild(viewHeader('Feed', { toggle: { cur: layout, key: 'myc_feed_layout', set: function () { render(); } }, action: newBtn }));
+    mount.appendChild(el('p', 'herosub', 'The main timeline — short posts from /r/feed and everywhere.'));
     chips(mount);
     var list = matchQuery(filterByClass(S.posts.filter(function (p) { return (p.form || 'short') !== 'long'; }), function (p) { return (authorOf(p).actorClass); }), postMatches);
     postList(mount, list, layout);
@@ -548,6 +550,7 @@ export const LANDING_APP_JS = `
     var newBtn = el('button', 'goldbtn sm', '+ New topic');
     newBtn.onclick = function () { openComposer(true); };
     mount.appendChild(viewHeader('Forum', { toggle: { cur: layout, key: 'myc_forum_layout', set: function () { render(); } }, action: newBtn }));
+    mount.appendChild(el('p', 'herosub', 'Long-form topics across all community roots.'));
     var list = matchQuery(S.posts.filter(function (p) { return p.form === 'long'; }), postMatches);
     postList(mount, list, layout === 'cards' ? 'table' : layout);
   }
@@ -633,25 +636,38 @@ export const LANDING_APP_JS = `
     });
   }
 
-function viewRoots(mount) {
+  var DEF_ICON = { feed: '\u{1F33E}', board: '\u{1F579}\uFE0F', forum: '\u{1F33F}', meta: '\u{1F4DC}' };
+
+  function viewRoots(mount) {
     mount.appendChild(viewHeader('Roots', {}));
-    var order = ['feed', 'board', 'forum', 'meta'];
-    var list = S.subroots.slice().sort(function (a, b) {
-      var ai = order.indexOf(a.archetype), bi = order.indexOf(b.archetype);
-      if (ai !== bi) return ai - bi;
-      return a.slug.localeCompare(b.slug);
-    });
-    if (list.length === 0) { mount.appendChild(el('div', 'empty', 'no roots yet')); return; }
-    list.forEach(function (sr) {
-      var cnt = 0; S.posts.forEach(function (p) { if (p.subroot === sr.slug) cnt++; });
-      var r = el('a', 'rrow'); r.href = '#/r/' + encodeURIComponent(sr.slug);
-      r.appendChild(el('span', 'rname', '/r/' + sr.slug));
-      r.appendChild(el('span', 'arpill', sr.archetype));
-      r.appendChild(el('span', 'rdesc', sr.description || sr.title || ''));
-      r.appendChild(el('span', 'dcount', cnt + ' posts'));
-      mount.appendChild(r);
-    });
+    mount.appendChild(el('p', 'herosub', 'Every post lives in a root. Special roots first, then community forums.'));
+    var subs = S.subroots.slice();
+    if (subs.length === 0) { mount.appendChild(el('div', 'empty', 'no roots yet')); return; }
+    function section(title, list) {
+      if (!list.length) return;
+      list.sort(function (a, b) { return a.slug.localeCompare(b.slug); });
+      mount.appendChild(el('div', 'sechead', title));
+      var grid = el('div', 'rgrid');
+      list.forEach(function (sr) {
+        var cnt = 0; S.posts.forEach(function (p) { if (p.subroot === sr.slug) cnt++; });
+        var c = el('a', 'rcard'); c.href = '#/r/' + encodeURIComponent(sr.slug);
+        c.appendChild(el('div', 'ricon', sr.icon || DEF_ICON[sr.archetype] || '\u{1F331}'));
+        c.appendChild(el('div', 'rname', '/r/' + sr.slug));
+        c.appendChild(el('div', 'rtitle', sr.title));
+        if (sr.description) c.appendChild(el('div', 'rdesc2', sr.description));
+        var ft = el('div', 'rfoot');
+        ft.appendChild(el('span', 'arpill', sr.archetype));
+        ft.appendChild(el('span', 'dcount', cnt + ' posts'));
+        c.appendChild(ft);
+        grid.appendChild(c);
+      });
+      mount.appendChild(grid);
+    }
+    section('Special roots', subs.filter(function (s) { return s.archetype === 'feed' || s.archetype === 'board'; }));
+    section('Community forums', subs.filter(function (s) { return s.archetype === 'forum'; }));
+    section('Meta', subs.filter(function (s) { return s.archetype === 'meta'; }));
   }
+
   function viewSubroot(mount, slug) {
     var sr = subrootOf(slug);
     if (!sr) {
@@ -661,16 +677,125 @@ function viewRoots(mount) {
       mount.appendChild(nf);
       return;
     }
-    var newBtn = el('button', 'goldbtn sm', '+ Post');
-    newBtn.onclick = function () { openComposer(sr.archetype === 'forum'); };
-    mount.appendChild(viewHeader('/r/' + slug, { action: newBtn }));
-    var meta = el('div', 'ameta');
-    meta.appendChild(el('span', 'arpill', sr.archetype));
-    meta.appendChild(el('span', 'am', sr.title));
-    if (sr.description) meta.appendChild(el('span', 'am', sr.description));
-    mount.appendChild(meta);
-    var list = S.posts.filter(function (p) { return p.subroot === slug; });
+    var isBoard = sr.archetype === 'board';
+    var isFeed = sr.archetype === 'forum' ? false : sr.archetype === 'feed';
+    var hero = el('div', 'rhero');
+    hero.appendChild(el('span', 'rheroicon', sr.icon || DEF_ICON[sr.archetype] || '\u{1F331}'));
+    var hi = el('div', 'rheroinfo');
+    hi.appendChild(el('h2', 'rherotitle', '/r/' + slug));
+    hi.appendChild(el('div', 'rherodesc', sr.description || sr.title));
+    var tags = el('div', 'rherotags');
+    tags.appendChild(el('span', 'arpill', sr.archetype));
+    if (isBoard) {
+      tags.appendChild(el('span', 'arpill', 'anonymous'));
+      tags.appendChild(el('span', 'arpill', 'vanishes in ' + (sr.config && sr.config.retentionDays || 1) + 'd'));
+    }
+    if (isFeed) tags.appendChild(el('span', 'arpill', 'main timeline'));
+    if (sr.url) {
+      var ul = el('a', 'rherolink', sr.url); ul.href = sr.url; ul.target = '_blank'; ul.rel = 'noopener';
+      tags.appendChild(ul);
+    }
+    hi.appendChild(tags);
+    hero.appendChild(hi);
+    var acts = el('div', 'rheroacts');
+    var canManage = S.me && S.me.actor && sr.creator && S.me.actor === sr.creator;
+    if (canManage) {
+      var mg = el('button', 'ghostbtn sm', 'Manage');
+      mg.onclick = function () { openManage(sr); };
+      acts.appendChild(mg);
+    }
+    if (!isBoard) {
+      var pb = el('button', 'goldbtn sm', sr.archetype === 'forum' ? '+ New topic' : '+ Post');
+      pb.onclick = function () { openComposer(sr.archetype === 'forum', slug); };
+      acts.appendChild(pb);
+    }
+    hero.appendChild(acts);
+    mount.appendChild(hero);
+    if (isBoard) mount.appendChild(anonComposer(slug));
+    var list;
+    if (isFeed) list = S.posts.filter(function (p) { return (p.form || 'short') !== 'long'; });
+    else list = S.posts.filter(function (p) { return p.subroot === slug; });
     postList(mount, list, sr.archetype === 'forum' ? 'table' : 'cards');
+  }
+
+  function anonComposer(slug) {
+    var box = el('div', 'card anonbox');
+    box.appendChild(el('div', 'anonhint', 'No account needed. Posting as Anonymous — gone in 24h.'));
+    var ta = el('textarea', 'ctext'); ta.placeholder = 'Speak into the void…'; ta.maxLength = 5000;
+    var go = el('button', 'goldbtn', 'Post anonymously');
+    go.onclick = function () {
+      var c = ta.value.trim();
+      if (!c) { toast('empty post'); return; }
+      go.disabled = true;
+      api('/api/post', 'POST', { identifier: '', content: c, form: 'short', subroot: slug, anonymous: true }).then(function (j) {
+        if (j._status === 201) {
+          toast('posted to the void');
+          return api('/api/feed?limit=200').then(function (f2) {
+            if (f2._status === 200) { S.posts = f2.posts || S.posts; buildTagIndex(); buildReplies(); }
+            render();
+          });
+        }
+        go.disabled = false;
+        toast(j.error || 'post failed');
+      }).catch(function () { go.disabled = false; toast('network error'); });
+    };
+    box.appendChild(ta); box.appendChild(go);
+    return box;
+  }
+
+  function openManage(sr) {
+    var ov = el('div', 'overlay');
+    var box = el('div', 'cbox');
+    var h = el('div', 'chead');
+    h.appendChild(el('span', 'ctitle', 'Manage /r/' + sr.slug));
+    var x = el('button', 'iconbtn', '\u2715'); x.title = 'Close';
+    x.onclick = function () { ov.remove(); };
+    h.appendChild(x); box.appendChild(h);
+    function row(label, val, ph, isArea) {
+      var r = el('div', 'mrow');
+      r.appendChild(el('label', null, label));
+      var inp = isArea ? el('textarea', 'cinput') : el('input', 'cinput');
+      inp.value = val || ''; if (ph) inp.placeholder = ph;
+      r.appendChild(inp); box.appendChild(r);
+      return inp;
+    }
+    var ti = row('Title', sr.title, '');
+    var de = row('Description', sr.description, '', true);
+    var ic = row('Icon (emoji)', sr.icon || '', '\u{1F331}');
+    var ur = row('URL', sr.url || '', 'https://');
+    var vr = el('div', 'mrow');
+    vr.appendChild(el('label', null, 'Votes'));
+    var vc = el('input'); vc.type = 'checkbox'; vc.checked = sr.config && sr.config.votes === true;
+    vr.appendChild(vc); box.appendChild(vr);
+    var ri = null;
+    if (sr.archetype === 'board') {
+      var rr = el('div', 'mrow');
+      rr.appendChild(el('label', null, 'Retention (days)'));
+      ri = el('input', 'cinput'); ri.value = String(sr.config && sr.config.retentionDays || 1);
+      rr.appendChild(ri); box.appendChild(rr);
+    }
+    var go = el('button', 'goldbtn', 'Save');
+    go.onclick = function () {
+      var cfg = sr.config ? JSON.parse(JSON.stringify(sr.config)) : {};
+      cfg.votes = vc.checked;
+      if (ri) cfg.retentionDays = Number(ri.value) || 1;
+      var body = {
+        title: ti.value.trim(), description: de.value.trim(),
+        icon: ic.value.trim(), url: ur.value.trim(),
+        config: cfg,
+      };
+      api('/api/subroot?slug=' + encodeURIComponent(sr.slug), 'PATCH', body).then(function (j) {
+        if (j._status === 200) {
+          ov.remove(); toast('root updated');
+          return api('/api/subroots').then(function (s2) {
+            if (s2._status === 200 && s2.subroots) { S.subroots = s2.subroots; render(); }
+          });
+        }
+        toast(j.error || 'update failed');
+      }).catch(function () { toast('network error'); });
+    };
+    var f = el('div', 'cfoot'); f.appendChild(el('span', 'ccount', 'creator settings')); f.appendChild(go); box.appendChild(f);
+    ov.appendChild(box); document.body.appendChild(ov);
   }
 
   function viewTags(mount) {

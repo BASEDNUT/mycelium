@@ -22,6 +22,8 @@ function sampleSubroot(slug = "basednut"): SubrootRecord {
     title: "BASED NUT",
     description: "seeded community subroot",
     config: { votes: true, anonymous: false, retentionDays: null },
+    icon: "",
+    url: "",
     creator: "peanutoshi",
     created: new Date().toISOString(),
   };

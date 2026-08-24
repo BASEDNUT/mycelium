@@ -111,6 +111,8 @@ export function validateSubroot(input: {
   archetype: string;
   title: string;
   description: string;
+  icon?: string;
+  url?: string;
   config: { votes: boolean; anonymous: boolean; retentionDays: number | null };
 }): { valid: true; record: SubrootRecord } | { valid: false; error: string } {
   const { slug, archetype, title, description, config } = input;
@@ -139,6 +141,11 @@ export function validateSubroot(input: {
   if (archetype === "meta" && config.anonymous === true) {
     return { valid: false, error: "meta subroots cannot be anonymous" };
   }
+  const icon = (input.icon ?? "").trim().slice(0, 16);
+  const url = (input.url ?? "").trim();
+  if (url !== "" && !/^https?:\/\/\S{1,300}$/.test(url)) {
+    return { valid: false, error: "url must be http(s) link" };
+  }
   return {
     valid: true,
     record: {
@@ -146,6 +153,8 @@ export function validateSubroot(input: {
       archetype: archetype as SubrootArchetype,
       title,
       description,
+      icon,
+      url,
       config: {
         votes: config.votes === true,
         anonymous: config.anonymous === true,
@@ -222,7 +231,21 @@ export async function handleApi(
     }
     const identifier = String(body.identifier ?? "").trim().toLowerCase();
     const content = String(body.content ?? "").trim();
-    if (!(await requireActor(request, deps, identifier))) {
+    // v0.13.0: anonymous board posting — no account needed inside boards
+    // configured anonymous:true. Author forced to the system "anonymous" actor.
+    const anonSlug = body.subroot == null ? null : String(body.subroot).trim().toLowerCase();
+    let postingAs = identifier;
+    if (body.anonymous === true && anonSlug != null && SUBROOT_SLUG.test(anonSlug)) {
+      const sr = await deps.store.getSubroot(anonSlug);
+      if (sr == null) return json(404, { error: "unknown subroot" });
+      if (sr.archetype !== "board" || sr.config.anonymous !== true) {
+        return json(403, { error: "anonymous posting only allowed on anonymous boards" });
+      }
+      postingAs = "anonymous";
+      if (await deps.store.getActor("anonymous") == null) {
+        return json(500, { error: "anonymous actor missing on node" });
+      }
+    } else if (!(await requireActor(request, deps, identifier))) {
       return json(401, { error: "unauthorized for actor: " + identifier });
     }
     const inReplyTo = body.inReplyTo == null
@@ -232,7 +255,7 @@ export async function handleApi(
     const title = body.title == null
       ? undefined
       : String(body.title).trim();
-    if (!identifier || !content) {
+    if (!postingAs || !content) {
       return json(400, { error: "identifier and content required" });
     }
     if (content.length > MAX_CONTENT) {
@@ -247,7 +270,7 @@ export async function handleApi(
     if (title != null && title.length > MAX_TITLE) {
       return json(400, { error: `title too long (max ${MAX_TITLE})` });
     }
-    if (await deps.store.getActor(identifier) == null) {
+    if (await deps.store.getActor(postingAs) == null) {
       return json(404, { error: "unknown actor" });
     }
     // Optional subroot binding (v0.11.0): container must exist.
@@ -281,7 +304,7 @@ export async function handleApi(
 
     const post: PostRecord = {
       id: crypto.randomUUID(),
-      identifier,
+      identifier: postingAs,
       content,
       published: new Date().toISOString(),
       inReplyTo: replyUri,
@@ -306,7 +329,7 @@ export async function handleApi(
       for (const t of mentionTags) {
         const href = t.href?.href ?? "";
         const name = (t.name ?? "").replace("@", "");
-        if (localActors.has(name) && name !== identifier) mentioned.push(name);
+        if (localActors.has(name) && name !== postingAs) mentioned.push(name);
       }
       const extraCcs = mentionTags.map((t) => t.href!) as URL[];
       const create = buildCreate(ctx, post, {
@@ -319,7 +342,7 @@ export async function handleApi(
           id: crypto.randomUUID(),
           type: "mention",
           identifier: name,
-          fromActorId: identifier,
+          fromActorId: postingAs,
           postId: post.id,
           read: false,
           created: new Date().toISOString(),
@@ -330,20 +353,20 @@ export async function handleApi(
         const rm = replyUri.match(
           new RegExp(`^${escapeRe(deps.origin)}/ap/actor/([^/]+)/p/[^/]+$`),
         );
-        if (rm != null && rm[1] !== identifier && localActors.has(rm[1])) {
+        if (rm != null && rm[1] !== postingAs && localActors.has(rm[1])) {
           await deps.store.putNotification({
             id: crypto.randomUUID(),
             type: "reply",
             identifier: rm[1],
-            fromActorId: identifier,
+            fromActorId: postingAs,
             postId: post.id,
             read: false,
             created: new Date().toISOString(),
           });
         }
       }
-      await ctx.sendActivity({ identifier }, "followers", create);
-      followersNotified = (await deps.store.getFollowers(identifier)).length;
+      await ctx.sendActivity({ identifier: postingAs }, "followers", create);
+      followersNotified = (await deps.store.getFollowers(postingAs)).length;
     } catch (e) {
       console.error("api: fan-out failed (post stored):", e);
     }
@@ -374,6 +397,8 @@ export async function handleApi(
       archetype: String(body.archetype ?? "").trim(),
       title: String(body.title ?? "").trim(),
       description: String(body.description ?? "").trim(),
+      icon: String(body.icon ?? "").trim(),
+      url: String(body.url ?? "").trim(),
       config: {
         votes: cfg.votes === true,
         anonymous: cfg.anonymous === true,
@@ -389,6 +414,61 @@ export async function handleApi(
     const creator = String(body.creator ?? "__instance__").trim().toLowerCase();
     await deps.store.putSubroot({ ...result.record, creator });
     return json(201, { ok: true, subroot: { ...result.record, creator } });
+  }
+
+  // v0.13.0: creator-managed subroot update (PATCH).
+  if (path === "/api/subroot" && request.method === "PATCH") {
+    if (!deps.rateLimits.write.allow(clientKey(request))) return tooMany();
+    const slug = (url.searchParams.get("slug") ?? "").trim().toLowerCase();
+    if (!SUBROOT_SLUG.test(slug)) return json(400, { error: "invalid subroot slug" });
+    const existing = await deps.store.getSubroot(slug);
+    if (existing == null) return json(404, { error: "unknown subroot" });
+    // auth: admin token OR the creator's actor token
+    const t = bearer(request);
+    if (t == null) return json(401, { error: "auth required" });
+    if (t !== deps.adminToken) {
+      const actor = await deps.auth.authenticate(t);
+      if (actor == null || actor !== existing.creator) {
+        return json(403, { error: "only creator or admin may manage this root" });
+      }
+    }
+    let body: Record<string, unknown>;
+    try { body = await request.json(); } catch { return json(400, { error: "invalid json" }); }
+    const title = body.title == null ? existing.title : String(body.title).trim();
+    const description = body.description == null
+      ? existing.description
+      : String(body.description).trim();
+    const icon = body.icon == null ? existing.icon : String(body.icon).trim().slice(0, 16);
+    const extUrl = body.url == null ? existing.url : String(body.url).trim();
+    const cfgIn = (body.config ?? existing.config) as Record<string, unknown>;
+    const config = {
+      votes: cfgIn.votes === true,
+      anonymous: cfgIn.anonymous === true,
+      retentionDays: cfgIn.retentionDays == null ? null : Number(cfgIn.retentionDays),
+    };
+    if (existing.archetype === "board" && (config.retentionDays == null || config.retentionDays < 1 || config.retentionDays > 365)) {
+      return json(400, { error: "board requires retentionDays 1-365" });
+    }
+    if (existing.archetype !== "board" && config.retentionDays != null) {
+      return json(400, { error: "retentionDays only allowed on board archetype" });
+    }
+    if (!title || title.length > MAX_SUBROOT_TITLE) return json(400, { error: "title required (max 96)" });
+    if (description.length > MAX_SUBROOT_DESC) return json(400, { error: "description too long" });
+    if (extUrl !== "" && !/^https?:\/\/\S{1,300}$/.test(extUrl)) return json(400, { error: "url must be http(s) link" });
+    const updated = await deps.store.updateSubroot(slug, { title, description, icon, url: extUrl, config });
+    return json(200, { ok: true, subroot: updated });
+  }
+
+  // v0.13.0: admin-only subroot delete. Posts keep their subroot field;
+  // they simply become unlisted (browse-safe) — caller should rebind first.
+  if (path === "/api/subroot" && request.method === "DELETE") {
+    if (!isAdmin(request, deps)) return json(401, { error: "admin token required" });
+    const slug = (url.searchParams.get("slug") ?? "").trim().toLowerCase();
+    if (!SUBROOT_SLUG.test(slug)) return json(400, { error: "invalid subroot slug" });
+    const existing = await deps.store.getSubroot(slug);
+    if (existing == null) return json(404, { error: "unknown subroot" });
+    await deps.store.deleteSubroot(slug);
+    return json(200, { ok: true, deleted: slug });
   }
 
   if (path === "/api/feed" && request.method === "GET") {
