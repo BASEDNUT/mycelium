@@ -294,6 +294,7 @@ export const LANDING_APP_JS = `
     var a = el('a', 'navitem' + (S.view === hash ? ' on' : ''), null);
     a.href = hash;
     a.setAttribute('aria-label', label);
+    if (S.view === hash) a.setAttribute('aria-current', 'page');
     a.appendChild(el('span', 'nicon', icon));
     a.appendChild(el('span', 'nlabel', label));
     if (badge) { var b = el('span', 'nbadge', badge); a.appendChild(b); }

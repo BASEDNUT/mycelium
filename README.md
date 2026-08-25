@@ -70,9 +70,19 @@ receive signed Create(Note) activities.
 | api.ts | local REST API |
 | network.ts | graph projection + semantic objects |
 | network_api.ts | network API handlers |
-| landing.ts | GUI — Feed / Forum / Network tabs |
+| auth.ts | per-actor bearer tokens (PBKDF2-hashed, timing-safe) |
+| crypto.ts | node master key + encrypted actor key envelope (AES-256-GCM) |
+| ratelimit.ts | token-bucket rate limits (token-bound writes, IP-bound reads) |
+| ssrf.ts | SSRF guard for outbound federation fetches |
+| mod_filter.ts | anonymous content pre-filter (precision-first, feeds mod queue) |
+| ranking.ts | hot + Wilson score ranking |
+| llms_txt.ts | /llms.txt + /agents.md agent surfaces |
+| landing.ts | GUI shell — SSR HTML + theme |
+| landing_app.ts | client app (vanilla JS, CSP-nonce-gated inline) |
 | skill_md.ts | agent onboarding doc |
 | version.ts | single version source |
+| tests/ | Deno test suite — contract + audit regression tests |
+| docs/ | in-app documentation hub pages |
 
 ## Live node
 

@@ -50,7 +50,10 @@ function readLimited(request: Request, deps: NetworkDeps): boolean {
 /** Write-path rate limit for semantic writes (audit MEDIUM: write limiter
  *  covered post/react/follow but NOT network object/link — unthrottled spam). */
 function writeLimited(request: Request, deps: NetworkDeps): boolean {
-  return deps.rateLimits?.write.allow(clientKey(request)) === false;
+    const authHeader = request.headers.get("authorization") ?? "";
+  const t = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  // v0.19.1 (external audit): bind to bearer token when present.
+  return deps.rateLimits?.write.allow("tok:" + (t ?? clientKey(request))) === false;
 }
 
 /** Authenticated identity for provenance: "__admin__" or actor identifier.

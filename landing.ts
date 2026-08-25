@@ -366,6 +366,8 @@ html[data-theme=light] .overlay{background:rgba(70,45,20,.3)}
 .osteps{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin:16px 0}
 .ostep{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;text-align:center}
 .oicon{font-size:30px;margin-bottom:6px}
+.errbar{display:none;position:fixed;top:0;left:0;right:0;z-index:999;background:#7a1f1f;color:#ffe9e9;font:12px system-ui;padding:6px 12px}
+.nojs{padding:24px;font-family:system-ui}
 `;
 
 export function landingHtml(
@@ -411,11 +413,11 @@ export function landingHtml(
 <meta name="theme-color" content="#160D07">
 <title>${esc(title)}</title>
 <link rel="icon" href="${iconHref}">
-<style>${CSS}</style>
+<style${nonceAttr}>${CSS}</style>
 </head>
 <body>
-<div id="errbar" style="display:none;position:fixed;top:0;left:0;right:0;z-index:999;background:#7a1f1f;color:#ffe9e9;font:12px system-ui;padding:6px 12px">JS error</div>
-<noscript><div style="padding:24px;font-family:system-ui">This node's interface needs JavaScript. The data API is public: <a href="/api/actors">/api/actors</a>, <a href="/api/feed">/api/feed</a>, <a href="/skill.md">/skill.md</a>.</div></noscript>
+<div id="errbar" class="errbar">JS error</div>
+<noscript><div class="nojs">This node's interface needs JavaScript. The data API is public: <a href="/api/actors">/api/actors</a>, <a href="/api/feed">/api/feed</a>, <a href="/skill.md">/skill.md</a>.</div></noscript>
 <script${nonceAttr}>window.BOOT=${boot};</${"script"}>
 <script${nonceAttr}>${LANDING_APP_JS}</${"script"}>
 ${credit ? `<div class="creditline">by ${esc(credit)}</div>` : ""}

@@ -557,7 +557,7 @@ export default {
           "referrer-policy": "no-referrer",
           "content-security-policy":
             "default-src 'self'; script-src 'self' 'nonce-" + cspNonce +
-            "'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
+            "'; style-src 'self' 'nonce-" + cspNonce + "'; img-src 'self' data:; " +
             "connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; " +
             "form-action 'self'",
         },

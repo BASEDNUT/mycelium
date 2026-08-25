@@ -66,6 +66,14 @@ function bearer(request: Request): string | null {
   return auth.startsWith("Bearer ") ? auth.slice(7) : null;
 }
 
+/** v0.19.1 (external audit): write/federation limits bind to the bearer
+ * token when present, so a leaked token cannot be hammered from many
+ * IPs; anonymous requests fall back to the client IP key. */
+function writeKey(request: Request): string {
+  const t = bearer(request);
+  return "tok:" + (t ?? clientKey(request));
+}
+
 /** Admin (operator) authorization — token management + bootstrap only. */
 function isAdmin(request: Request, deps: ApiDeps): boolean {
   const t = bearer(request);
@@ -230,7 +238,7 @@ export async function handleApi(
   }
 
   if (path === "/api/post" && request.method === "POST") {
-    if (!deps.rateLimits.write.allow(clientKey(request))) return tooMany();
+    if (!deps.rateLimits.write.allow(writeKey(request))) return tooMany();
     let body: Record<string, unknown>;
     try {
       body = await request.json();
@@ -428,7 +436,7 @@ export async function handleApi(
   // v0.14.0: delete a post. Author of the post, a moderator of the post's
   // subroot, or the admin token may remove it.
   if (path === "/api/post" && request.method === "DELETE") {
-    if (!deps.rateLimits.write.allow(clientKey(request))) return tooMany();
+    if (!deps.rateLimits.write.allow(writeKey(request))) return tooMany();
     const id = (url.searchParams.get("id") ?? "").trim();
     if (!id) return json(400, { error: "id query param required" });
     const post = await deps.store.getPost(id);
@@ -490,7 +498,7 @@ export async function handleApi(
 
   // v0.13.0: creator-managed subroot update (PATCH).
   if (path === "/api/subroot" && request.method === "PATCH") {
-    if (!deps.rateLimits.write.allow(clientKey(request))) return tooMany();
+    if (!deps.rateLimits.write.allow(writeKey(request))) return tooMany();
     const slug = (url.searchParams.get("slug") ?? "").trim().toLowerCase();
     if (!SUBROOT_SLUG.test(slug)) return json(400, { error: "invalid subroot slug" });
     const existing = await deps.store.getSubroot(slug);
@@ -614,7 +622,7 @@ export async function handleApi(
 
   // ── like / boost ──
   if (path === "/api/react" && request.method === "POST") {
-    if (!deps.rateLimits.write.allow(clientKey(request))) return tooMany();
+    if (!deps.rateLimits.write.allow(writeKey(request))) return tooMany();
     let body: Record<string, unknown>;
     try {
       body = await request.json();
@@ -804,7 +812,7 @@ export async function handleApi(
 
   // ── outbound follow ──
   if (path === "/api/follow" && request.method === "POST") {
-    if (!deps.rateLimits.federation.allow(clientKey(request))) return tooMany();
+    if (!deps.rateLimits.federation.allow(writeKey(request))) return tooMany();
     let body: Record<string, unknown>;
     try {
       body = await request.json();
@@ -967,7 +975,7 @@ export async function handleApi(
 
   // ── votes (v0.12.0) ──
   if (path === "/api/vote" && request.method === "POST") {
-    if (!deps.rateLimits.write.allow(clientKey(request))) return tooMany();
+    if (!deps.rateLimits.write.allow(writeKey(request))) return tooMany();
     let body: Record<string, unknown>;
     try {
       body = await request.json();
@@ -1019,7 +1027,7 @@ export async function handleApi(
 
   // ── DMs (v0.15.0) ──
   if (path === "/api/dm" && request.method === "POST") {
-    if (!deps.rateLimits.write.allow(clientKey(request))) return tooMany();
+    if (!deps.rateLimits.write.allow(writeKey(request))) return tooMany();
     let body: Record<string, unknown>;
     try {
       body = await request.json();
@@ -1075,7 +1083,7 @@ export async function handleApi(
 
   // ── bookmarks (v0.15.0) ──
   if (path === "/api/bookmark" && request.method === "POST") {
-    if (!deps.rateLimits.write.allow(clientKey(request))) return tooMany();
+    if (!deps.rateLimits.write.allow(writeKey(request))) return tooMany();
     let body: Record<string, unknown>;
     try {
       body = await request.json();
@@ -1109,7 +1117,7 @@ export async function handleApi(
   }
 
   if (path === "/api/bookmark" && request.method === "DELETE") {
-    if (!deps.rateLimits.write.allow(clientKey(request))) return tooMany();
+    if (!deps.rateLimits.write.allow(writeKey(request))) return tooMany();
     let body: Record<string, unknown>;
     try {
       body = await request.json();
@@ -1130,7 +1138,7 @@ export async function handleApi(
 
   // ── reports + moderation (v0.15.0) ──
   if (path === "/api/report" && request.method === "POST") {
-    if (!deps.rateLimits.write.allow(clientKey(request))) return tooMany();
+    if (!deps.rateLimits.write.allow(writeKey(request))) return tooMany();
     let body: Record<string, unknown>;
     try {
       body = await request.json();
