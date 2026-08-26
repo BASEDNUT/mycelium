@@ -1853,7 +1853,7 @@ export const LANDING_APP_JS = `
           var card = el('div', 'deckcard');
           var who = el('div', 'deckwho');
           var h = String(p.actor || '');
-          var short = h.replace(/^https?:\/\//, '').split('/')[0];
+          var short = h.replace('https://', '').replace('http://', '').split('/')[0];
           who.appendChild(el('span', 'slabel', short));
           if (p.published) who.appendChild(el('span', 'sval', fmtTime(p.published)));
           card.appendChild(who);
