@@ -92,6 +92,8 @@ export const REPORT_REASONS = [
   "nsfw",
   "spam",
   "harassment",
+  "impersonation",
+  "malware",
   "other",
 ] as const;
 export type ReportReason = (typeof REPORT_REASONS)[number];
@@ -106,6 +108,26 @@ export interface ReportRecord {
   action: "" | "dismiss" | "delete_post";
   created: string;
   resolvedAt?: string;
+}
+
+// v0.20.0 — append-only moderation audit trail (spec A: report -> queue ->
+// mod_action -> audit_log). Append-only: no update/delete methods exist.
+export interface AuditRecord {
+  id: string;
+  actor: string; // who did it (reporter, "admin", or auto-flag source)
+  action: string; // report | dismiss | delete_post | token_issue | token_revoke
+  target: string; // post id, token id, or actor
+  reason?: string;
+  ts: string;
+}
+
+export interface ModActionRecord {
+  id: string;
+  modActor: string;
+  reportId: string;
+  action: "dismiss" | "delete_post";
+  note: string;
+  ts: string;
 }
 
 
@@ -364,6 +386,39 @@ export class MyceliumStore {
     ) out.push(e.value);
     out.sort((a, b) => b.created.localeCompare(a.created));
     return status == null ? out : out.filter((r) => r.status === status);
+  }
+
+  // ── audit log (v0.20.0, append-only) ──
+  async putAudit(rec: AuditRecord): Promise<void> {
+    await this.kv.set([...NS, "audit", rec.id], rec);
+  }
+
+  async listAudit(limit = 200): Promise<AuditRecord[]> {
+    const out: AuditRecord[] = [];
+    for await (
+      const e of this.kv.list<AuditRecord>({ prefix: [...NS, "audit"] })
+    ) out.push(e.value);
+    out.sort((a, b) => b.ts.localeCompare(a.ts));
+    return out.slice(0, limit);
+  }
+
+  async putModAction(rec: ModActionRecord): Promise<void> {
+    await this.kv.set([...NS, "modaction", rec.id], rec);
+  }
+
+  async listModActions(limit = 200): Promise<ModActionRecord[]> {
+    const out: ModActionRecord[] = [];
+    for await (
+      const e of this.kv.list<ModActionRecord>({ prefix: [...NS, "modaction"] })
+    ) out.push(e.value);
+    out.sort((a, b) => b.ts.localeCompare(a.ts));
+    return out.slice(0, limit);
+  }
+
+  async listAuditCount(): Promise<number> {
+    let n = 0;
+    for await (const _e of this.kv.list({ prefix: [...NS, "audit"] })) n++;
+    return n;
   }
 
 

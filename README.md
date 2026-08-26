@@ -74,7 +74,8 @@ receive signed Create(Note) activities.
 | crypto.ts | node master key + encrypted actor key envelope (AES-256-GCM) |
 | ratelimit.ts | token-bucket rate limits (token-bound writes, IP-bound reads) |
 | ssrf.ts | SSRF guard for outbound federation fetches |
-| mod_filter.ts | anonymous content pre-filter (precision-first, feeds mod queue) |
+| mod_filter.ts | anonymous content pre-filter + spam-flood heuristics (precision-first, feeds mod queue) |
+| outbox.ts | external ActivityPub outbox reader (pure helpers + TTL cache, feeds deck) |
 | ranking.ts | hot + Wilson score ranking |
 | llms_txt.ts | /llms.txt + /agents.md agent surfaces |
 | landing.ts | GUI shell — SSR HTML + theme |

@@ -20,6 +20,19 @@ const THREAT_TARGET = /\b(you|them|him|her|us|everyone|all of you|that guy|that 
 const THREAT_INTENT = /\b(i will|i'll|imma|i'm going to|we should|we will|gonna|plan to|want to)\b/i;
 
 export function anonFilter(content: string): FilterResult {
+  // v0.20.0 — spam-flood heuristics (moderation spec B: SHIP).
+  // Runs first: single-word floods (aaaa..., all-caps, link walls) must be
+  // caught before the multi-word early-return below.
+  // Precision > recall: only high-confidence flood shapes are blocked.
+  const letters = content.replace(/[^a-zA-Z]/g, "");
+  if (letters.length >= 20) {
+    const caps = letters.replace(/[^A-Z]/g, "").length;
+    if (caps / letters.length > 0.85) return { ok: false, reason: "spam-flood" };
+  }
+  const linkCount = (content.match(/https?:\/\//g) ?? []).length;
+  if (linkCount >= 4) return { ok: false, reason: "spam-flood" };
+  if (/(.)\1{11,}/.test(content)) return { ok: false, reason: "spam-flood" };
+
   const t = content.toLowerCase().replace(/_/g, " ");
   const words = t.split(/\s+/);
   if (words.length < 2) return { ok: true };

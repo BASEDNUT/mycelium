@@ -1612,6 +1612,7 @@ export const LANDING_APP_JS = `
     rail.appendChild(navItem('#/tags', '#', 'Tags'));
     rail.appendChild(navItem('#/notifications', '\u{1F514}', 'Notifications', nbadge));
   rail.appendChild(navItem('#/messages', '\u{1F4AC}', 'Messages'));
+    rail.appendChild(navItem('#/deck', '\u{1F5A5}\uFE0F', 'Deck'));
     rail.appendChild(navItem('#/settings', '\u2699\uFE0F', 'Settings'));
     rail.appendChild(navItem('#/docs', '\u{1F4D6}', 'Docs'));
     rail.appendChild(navItem('#/admin', '\u{1F4CA}', 'Admin'));
@@ -1734,6 +1735,135 @@ export const LANDING_APP_JS = `
         holder.appendChild(c);
       });
     }).catch(function () { clear(holder); holder.appendChild(el('div', 'empty', 'network error')); });
+
+    // ── v0.20.0: token management panel ──
+    var tp = el('div', 'panel');
+    tp.appendChild(el('h3', 'ptitle', 'Token management'));
+    var tform = el('div', 'dmform');
+    var tid = el('input', 'ainput');
+    tid.placeholder = 'actor identifier (e.g. alice)';
+    tid.setAttribute('aria-label', 'actor identifier');
+    var ttl = el('select', 'segbtn');
+    ttl.setAttribute('aria-label', 'token lifetime');
+    [['', 'no expiry'], ['24', '24h'], ['168', '7d'], ['720', '30d']].forEach(function (o) {
+      var opt = el('option', null, o[1]);
+      opt.value = o[0];
+      ttl.appendChild(opt);
+    });
+    var tgo = el('button', 'goldbtn sm', 'Issue');
+    var tresult = el('div', 'modnote');
+    tgo.onclick = function () {
+      var v = tid.value.trim().toLowerCase();
+      if (!v) { toast('enter actor identifier'); return; }
+      var body = { identifier: v };
+      var h = ttl.value ? Number(ttl.value) : undefined;
+      if (h) body.ttlHours = h;
+      adminApi('/api/token/issue', 'POST', body).then(function (j) {
+        clear(tresult);
+        if (j._status !== 201) { tresult.appendChild(el('span', 'slabel', j.error || 'issue failed')); return; }
+        tresult.appendChild(el('span', 'slabel', 'token: ' + j.token + (j.expires ? ' (expires ' + j.expires.slice(0, 10) + ')' : ' (no expiry)')));
+        loadTokens();
+      }).catch(function () { clear(tresult); tresult.appendChild(el('span', 'slabel', 'network error')); });
+    };
+    tform.appendChild(tid); tform.appendChild(ttl); tform.appendChild(tgo);
+    tp.appendChild(tform);
+    tp.appendChild(tresult);
+    var tlist = el('div', null, null);
+    tp.appendChild(tlist);
+    function loadTokens() {
+      adminApi('/api/token/list', 'GET').then(function (j) {
+        clear(tlist);
+        if (j._status !== 200) { tlist.appendChild(el('div', 'empty', j.error || 'unlock to view tokens')); return; }
+        var toks = j.tokens || [];
+        if (toks.length === 0) { tlist.appendChild(el('div', 'empty', 'no tokens issued')); return; }
+        toks.forEach(function (t) {
+          var r = el('div', 'modline');
+          var exp = t.expires ? 'expires ' + String(t.expires).slice(0, 10) : 'no expiry';
+          r.appendChild(el('span', 'slabel', (t.identifier || t.actor || '?') + ' \u00B7 ' + exp));
+          var rv = el('button', 'ghostbtn sm', 'Revoke');
+          rv.onclick = function () {
+            adminApi('/api/token/revoke', 'POST', { identifier: t.identifier || t.actor }).then(function (j2) {
+              if (j2._status === 200) { toast('revoked'); loadTokens(); }
+              else toast(j2.error || 'revoke failed');
+            });
+          };
+          r.appendChild(rv);
+          tlist.appendChild(r);
+        });
+      }).catch(function () { clear(tlist); tlist.appendChild(el('div', 'empty', 'network error')); });
+    }
+    loadTokens();
+    mount.appendChild(tp);
+  }
+
+  // ── v0.20.0: external AP feed deck ──
+  function deckCols() {
+    try { return JSON.parse(localStorage.getItem('myc_deck') || '[]'); }
+    catch (e) { return []; }
+  }
+  function deckSave(cols) { localStorage.setItem('myc_deck', JSON.stringify(cols)); }
+  function viewDeck(mount) {
+    mount.appendChild(viewHeader('Deck', null));
+    var cols = deckCols();
+    var addbar = el('div', 'deckadd');
+    var inp = el('input', 'ainput');
+    inp.placeholder = 'user@host or outbox URL';
+    inp.setAttribute('aria-label', 'add feed handle or URL');
+    var go = el('button', 'goldbtn sm', 'Add');
+    go.onclick = function () {
+      var v = String(inp.value || '').trim();
+      if (!v) { toast('enter a handle or URL'); return; }
+      if (cols.indexOf(v) >= 0) { toast('already on deck'); return; }
+      if (cols.length >= 6) { toast('deck holds 6 columns'); return; }
+      cols.push(v); deckSave(cols); render();
+    };
+    inp.onkeydown = function (ev) { if (ev.key === 'Enter') go.onclick(); };
+    addbar.appendChild(inp); addbar.appendChild(go);
+    mount.appendChild(addbar);
+    mount.appendChild(el('div', 'dim', 'External ActivityPub feeds, read-only. Cached 60s server-side.'));
+    if (cols.length === 0) {
+      mount.appendChild(el('div', 'empty', 'no columns yet - add a handle like someone@mastodon.social'));
+      return;
+    }
+    var grid = el('div', 'deckgrid');
+    cols.forEach(function (c, ci) {
+      var col = el('div', 'deckcol');
+      var head = el('div', 'deckhead');
+      var label = el('span', 'decklabel', c.length > 34 ? c.slice(0, 34) + '\u2026' : c);
+      label.title = c;
+      var rm = el('button', 'ghostbtn sm', 'x');
+      rm.setAttribute('aria-label', 'remove column');
+      rm.onclick = function () { cols.splice(ci, 1); deckSave(cols); render(); };
+      head.appendChild(label); head.appendChild(rm);
+      col.appendChild(head);
+      var body = el('div', 'deckbody');
+      body.appendChild(el('div', 'empty', 'loading\u2026'));
+      col.appendChild(body);
+      grid.appendChild(col);
+      var q = c.indexOf('http') === 0 ? '?url=' + encodeURIComponent(c) : '?handle=' + encodeURIComponent(c);
+      api('/api/outbox' + q).then(function (j) {
+        clear(body);
+        if (j._status !== 200) {
+          body.appendChild(el('div', 'empty', j.error || 'feed unavailable'));
+          return;
+        }
+        var posts = j.posts || [];
+        if (posts.length === 0) { body.appendChild(el('div', 'empty', 'no notes')); return; }
+        posts.slice(0, 20).forEach(function (p) {
+          var card = el('div', 'deckcard');
+          var who = el('div', 'deckwho');
+          var h = String(p.actor || '');
+          var short = h.replace(/^https?:\/\//, '').split('/')[0];
+          who.appendChild(el('span', 'slabel', short));
+          if (p.published) who.appendChild(el('span', 'sval', fmtTime(p.published)));
+          card.appendChild(who);
+          var txt = String(p.content || '');
+          card.appendChild(el('div', 'decktext', txt.length > 320 ? txt.slice(0, 320) + '\u2026' : txt));
+          body.appendChild(card);
+        });
+      }).catch(function () { clear(body); body.appendChild(el('div', 'empty', 'network error')); });
+    });
+    mount.appendChild(grid);
   }
 
   // ── router ──
@@ -1754,6 +1884,7 @@ export const LANDING_APP_JS = `
     else if (h === '#/tags') viewTags(main);
     else if (h === '#/notifications') viewNotifications(main);
     else if (h === '#/messages') viewMessages(main);
+    else if (h === '#/deck') viewDeck(main);
     else if (h === '#/settings') viewSettings(main);
     else if (h === '#/docs') viewDocs(main, 'about');
     else if (h.indexOf('#/docs/') === 0 && h.length > 7) viewDocs(main, h.slice(7));

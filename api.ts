@@ -25,7 +25,33 @@ import { TokenAuth } from "./auth.ts";
 import type { NodeRateLimits } from "./ratelimit.ts";
 import { clientKey } from "./ratelimit.ts";
 import { assertFederatable, assertFederatableHost } from "./ssrf.ts";
+import { extractPosts, OutboxCache, webfingerUrl } from "./outbox.ts";
 import { VERSION } from "./version.ts";
+
+// v0.20.0 — external outbox cache (60s TTL) for the deck view.
+const outboxCache = new OutboxCache(60_000);
+
+/** v0.20.0 — append-only audit trail writer. Fire-and-forget safe. */
+async function audit(
+  deps: ApiDeps,
+  actor: string,
+  action: string,
+  target: string,
+  reason?: string,
+): Promise<void> {
+  try {
+    await deps.store.putAudit({
+      id: crypto.randomUUID(),
+      actor,
+      action,
+      target,
+      reason,
+      ts: new Date().toISOString(),
+    });
+  } catch {
+    // audit must never break the primary operation
+  }
+}
 
 // Deterministic Like/Announce activity ID so a later Undo can reference the
 // exact same activity (audit v0.9.1: random UUIDs made Undo impossible).
@@ -1172,6 +1198,7 @@ export async function handleApi(
       created: new Date().toISOString(),
     };
     await deps.store.putReport(report);
+    await audit(deps, identifier, "report", postId, reason);
     return json(201, { ok: true, report });
   }
 
@@ -1210,7 +1237,100 @@ export async function handleApi(
     report.action = action;
     report.resolvedAt = new Date().toISOString();
     await deps.store.putReport(report);
+    await deps.store.putModAction({
+      id: crypto.randomUUID(),
+      modActor: "admin",
+      reportId: id,
+      action: action as "dismiss" | "delete_post",
+      note: "",
+      ts: new Date().toISOString(),
+    });
+    await audit(deps, "admin", action, report.postId, report.reason);
     return json(200, { ok: true, resolved: id, action });
+  }
+
+  // ── v0.20.0 audit log (admin only, append-only view) ──
+  if (path === "/api/moderation/audit" && request.method === "GET") {
+    if (!isAdmin(request, deps)) return json(403, { error: "admin token required" });
+    const limitParam = Number(url.searchParams.get("limit") ?? "200");
+    const limit = Number.isFinite(limitParam) && limitParam > 0 && limitParam <= 500
+      ? Math.floor(limitParam)
+      : 200;
+    const auditEntries = await deps.store.listAudit(limit);
+    return json(200, { count: auditEntries.length, audit: auditEntries });
+  }
+
+  // ── v0.20.0 external outbox reader (deck view) ──
+  // Reads a remote ActivityPub outbox. SSRF-guarded, 60s cached.
+  if (path === "/api/outbox" && request.method === "GET") {
+    if (readLimited(request, deps)) return tooMany();
+    const target = (url.searchParams.get("url") ?? "").trim();
+    const handle = (url.searchParams.get("handle") ?? "").trim();
+    if (!target && !handle) {
+      return json(400, { error: "url or handle required" });
+    }
+    let outboxUrl = target;
+    try {
+      if (!outboxUrl) {
+        // Resolve handle via webfinger.
+        const wfUrl = webfingerUrl(handle);
+        const wfHost = new URL(wfUrl).host;
+        await assertFederatableHost(wfHost);
+        const wfRes = await fetch(wfUrl, {
+          headers: { accept: "application/jrd+json, application/json" },
+        });
+        if (!wfRes.ok) return json(502, { error: "webfinger lookup failed" });
+        const wf = await wfRes.json();
+        const links = Array.isArray(wf.links) ? wf.links : [];
+        const selfLink = links.find(
+          (l: Record<string, unknown>) =>
+            l.rel === "self" && typeof l.href === "string",
+        );
+        if (selfLink == null) {
+          return json(404, { error: "no ActivityPub actor found for handle" });
+        }
+        const actorUrl = String(selfLink.href);
+        const actorHost = new URL(actorUrl).host;
+        await assertFederatableHost(actorHost);
+        const actorRes = await fetch(actorUrl, {
+          headers: { accept: 'application/activity+json, application/ld+json' },
+        });
+        if (!actorRes.ok) return json(502, { error: "actor fetch failed" });
+        const actorDoc = await actorRes.json();
+        const ob = actorDoc.outbox;
+        if (typeof ob !== "string") {
+          return json(404, { error: "actor has no outbox" });
+        }
+        outboxUrl = ob;
+      }
+      const outboxParsed = new URL(outboxUrl);
+      await assertFederatable(outboxParsed);
+    } catch (e) {
+      // SSRF violations are policy blocks (403); malformed input is a 400.
+      // ssrf.ts throws all guards with a leading "blocked" message.
+      if (e instanceof Error && e.message.startsWith("blocked")) {
+        return json(403, { error: e.message });
+      }
+      return json(400, { error: "invalid or blocked outbox url" });
+    }
+    const cached = outboxCache.get(outboxUrl);
+    if (cached != null) {
+      const posts = extractPosts(cached);
+      return json(200, { source: outboxUrl, cached: true, count: posts.length, posts });
+    }
+    let doc: unknown;
+    try {
+      const res = await fetch(outboxUrl, {
+        headers: { accept: 'application/activity+json, application/ld+json, application/json' },
+      });
+      if (!res.ok) return json(502, { error: "outbox fetch failed", status: res.status });
+      doc = await res.json();
+    } catch {
+      return json(502, { error: "outbox fetch failed" });
+    }
+    outboxCache.set(outboxUrl, doc);
+    const posts = extractPosts(doc);
+    return json(200, { source: outboxUrl, cached: false, count: posts.length, posts });
   }
 
   // ── token management (admin only) ──
@@ -1229,8 +1349,22 @@ export async function handleApi(
     if (await deps.store.getActor(identifier) == null) {
       return json(404, { error: "unknown actor" });
     }
-    const token = await deps.auth.issue(identifier);
-    return json(201, { ok: true, identifier, token });
+    // v0.20.0 - optional ttlHours: short-lived tokens (admin TTL UX).
+    let ttlMs: number | undefined;
+    const rawTtl = body.ttlHours;
+    if (rawTtl != null) {
+      const h = Number(rawTtl);
+      if (!Number.isFinite(h) || h <= 0 || h > 24 * 365) {
+        return json(400, { error: "ttlHours must be 0 < h <= 8760" });
+      }
+      ttlMs = h * 3_600_000;
+    }
+    const token = await deps.auth.issue(identifier, undefined, ttlMs);
+    await audit(deps, "admin", "token_issue", identifier);
+    const expires = ttlMs == null
+      ? undefined
+      : new Date(Date.now() + ttlMs).toISOString();
+    return json(201, { ok: true, identifier, token, expires });
   }
 
   if (path === "/api/token/revoke" && request.method === "POST") {

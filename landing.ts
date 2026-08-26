@@ -292,6 +292,15 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .nrow .nicon{flex:0 0 24px;text-align:center}
 .nactions{display:flex;justify-content:flex-end;margin:10px 0 14px}
 .nempty{display:flex;flex-direction:column;align-items:center;gap:12px;padding:48px 0;color:var(--muted)}
+.deckadd{display:flex;gap:8px;margin:10px 0 4px;align-items:center;flex-wrap:wrap}
+.deckgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-top:12px;align-items:start}
+.deckcol{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;max-height:70vh}
+.deckhead{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--panel2)}
+.decklabel{font-weight:600;font-size:13px;color:var(--cream);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.deckbody{overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:10px}
+.deckcard{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.deckwho{display:flex;justify-content:space-between;margin-bottom:6px}
+.decktext{font-size:13px;line-height:1.5;color:var(--cream);white-space:pre-wrap;word-break:break-word}
 .nrow.unread{border-color:var(--gold)}
 .nicon{font-size:16px}
 .ntext{flex:1;min-width:0;color:var(--muted)}
